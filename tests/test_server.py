@@ -258,6 +258,15 @@ def test_spliced_sentence_over_the_phoneme_limit_uses_normal_synthesis(loan_serv
     assert model.token_calls == [] and model.calls[-1]["text"] == sentence
 
 
+@pytest.mark.parametrize("length,spliced_path", [(ks.MAX_PHONEMES, True), (ks.MAX_PHONEMES + 1, False)])
+def test_phoneme_limit_boundary(loan_server, monkeypatch, length, spliced_path):
+    url, model = loan_server
+    monkeypatch.setattr(ks.kokoro_loanwords, "splice", lambda *a, **k: "x" * length)
+    post(url, {"input": "O pipeline.", "voice": "pf_dora", "english_words": ["pipeline"]}).read()
+    assert bool(model.token_calls) is spliced_path
+    assert (model.calls == []) is spliced_path
+
+
 def test_english_voice_ignores_the_dictionary(loan_server):
     url, model = loan_server
     post(url, {"input": "The pipeline is green.", "voice": "af_heart", "english_words": ["pipeline"]}).read()

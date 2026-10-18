@@ -62,6 +62,15 @@ def test_us_accent():
     assert lw.splice("Abre o (card).", ENTRIES, native, us) == "ˈabri ˈɔ (kˈɑɹd)."
 
 
+def test_word_outside_the_english_lexicon_uses_the_recorded_espeak_english_fallback():
+    # "zzqx" is in no lexicon: the pinned English G2P answers with espeak English (spelled out),
+    # recorded in the fixture. That is still English, so it is used.
+    def with_zzqx(text):
+        return {"O zzqx chegou.": "ʊ zˌezˌekˌeʃˈis ʃeɡˈow."}.get(text) or native(text)
+    out = lw.splice("O zzqx chegou.", lw.normalize(["zzqx"]), with_zzqx, uk)
+    assert out == f"ʊ {uk('zzqx')} ʃeɡˈow."
+
+
 def test_phrase_never_matches_across_punctuation():
     assert lw.splice("O pull, request ficou para depois.", lw.normalize(["pull request"]), native, uk) is None
 

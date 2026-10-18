@@ -117,8 +117,12 @@ def splice(text: str, entries: list[tuple[str, ...]], native: G2P, english: G2P)
         # Lowercase: the lexicon is case-insensitive for ordinary words, and a capital at the
         # start of a sentence must not turn "Deploy" into a different lookup.
         spoken = english(" ".join(words[start:end]).lower()).strip()
+        # Kokoro's English G2P falls back to espeak's English rules for words outside its lexicon,
+        # which is still an English pronunciation, the point of listing the word. Only an empty
+        # result, the "unknown" marker (G2P without a fallback) or a word-count mismatch keep the
+        # native pronunciation.
         if not spoken or "❓" in spoken or len(spoken.split()) != end - start:
-            out.extend(tokens[start:end])  # no usable English pronunciation: keep the native one
+            out.extend(tokens[start:end])
         else:
             lead = _LEAD.match(tokens[start])
             trail = _TRAIL.search(tokens[end - 1])
