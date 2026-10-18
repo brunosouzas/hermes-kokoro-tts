@@ -296,6 +296,33 @@ def test_single_voice_mode_is_unchanged(fake_server, tmp_path):
         (MIXED, "pf_dora", "b", "wav")]
 
 
+def test_english_words_go_with_non_english_runs_only(fake_server, tmp_path):
+    p = provider(fake_server, english_words=["pipeline", " card ", "", 7, "pipeline"], english_accent="uk",
+                 **BILINGUAL)
+    p.synthesize(MIXED, str(tmp_path / "a.wav"))
+    pt_req, en_req = Recorder.requests
+    assert pt_req["english_words"] == ["pipeline", "card"] and pt_req["english_accent"] == "b"
+    assert "english_words" not in en_req  # an English voice already says them in English
+
+
+def test_no_english_words_sends_nothing_extra(fake_server, tmp_path):
+    provider(fake_server, voice="pf_dora").synthesize("Oi.", str(tmp_path / "a.wav"))
+    assert "english_words" not in Recorder.requests[-1]
+
+
+def test_words_command_adds_removes_and_saves(tmp_path):
+    from argparse import Namespace
+    from kokoro_tts import kokoro_cli
+    store = {"english_words": ["pipeline"]}
+    handler = kokoro_cli.make_handler(lambda k, d=None: store.get(k, d), lambda: None,
+                                      save=lambda k, v: store.__setitem__(k, v))
+    assert handler(Namespace(kokoro_command="words", action="add", entries=["card", "Pipeline", "pull  request"])) == 0
+    assert store["english_words"] == ["pipeline", "card", "pull request"]
+    assert handler(Namespace(kokoro_command="words", action="remove", entries=["CARD"])) == 0
+    assert store["english_words"] == ["pipeline", "pull request"]
+    assert handler(Namespace(kokoro_command="words", action="add", entries=[])) == 2
+
+
 def test_bad_settings_fall_back_to_defaults(fake_server):
     p = provider(fake_server, voice="../x", speed="fast")
     assert p.default_voice() == "af_heart" and p._speed(None) == 1.0

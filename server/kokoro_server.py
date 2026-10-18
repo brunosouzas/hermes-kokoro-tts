@@ -28,12 +28,17 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import kokoro_voices  # noqa: E402  (copied next to this file by the installer)
+import kokoro_language  # noqa: E402  (these three are copied next to this file by the installer)
+import kokoro_loanwords  # noqa: E402
+import kokoro_voices  # noqa: E402
 
 SAMPLE_RATE = 24000
 MAX_INPUT_CHARS = 10000
 MAX_BODY_BYTES = 64 * 1024
 LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+ENGLISH_CODES = ("a", "b")
+MAX_PHONEMES = 510  # Kokoro's limit for one inference call
+MAX_ENGLISH_WORDS = kokoro_loanwords.MAX_ENTRIES
 
 log = logging.getLogger("kokoro_server")
 
@@ -95,23 +100,58 @@ class Engine:
             raise VoiceNotFound(f"voice {voice!r} is not in the installed model")
         return path
 
-    def synthesize(self, text: str, voice: str, lang_code: str, speed: float) -> bytes:
-        """Return mono int16 little-endian PCM at SAMPLE_RATE."""
+    def synthesize(self, text: str, voice: str, lang_code: str, speed: float,
+                   english_words: Optional[list] = None, english_accent: str = "a") -> bytes:
+        """Return mono int16 little-endian PCM at SAMPLE_RATE. ``english_words`` (non-English
+        voices only) are pronounced with English phonemes by the same voice."""
         if self._model is None:
             raise NotReady(self.error or "model is still loading")
         voice_file = str(self.voice_path(voice))
+        entries = kokoro_loanwords.normalize(english_words or []) if lang_code not in ENGLISH_CODES else []
         with self._lock:
-            return self._generate(text, voice_file, lang_code, speed)
+            if not entries:
+                return self._generate(text, voice_file, lang_code, speed)
+            return self._generate_with_loanwords(text, voice_file, lang_code, speed, entries, english_accent)
 
     def _generate(self, text: str, voice_file: str, lang_code: str, speed: float) -> bytes:
-        import numpy as np
+        pieces = [result.audio for result in
+                  self._model.generate(text=text, voice=voice_file, lang_code=lang_code, speed=speed)]
+        return _to_pcm(pieces)
+
+    def _g2p(self, lang_code: str) -> Callable[[str], str]:
+        pipeline = self._model._get_pipeline(lang_code)
+
+        def phonemize(text: str) -> str:
+            result = pipeline.g2p(text)
+            return (result[0] if isinstance(result, tuple) else result) or ""
+        return phonemize
+
+    def _generate_with_loanwords(self, text: str, voice_file: str, lang_code: str, speed: float,
+                                 entries: list, english_accent: str) -> bytes:
+        """Sentence by sentence: spliced phonemes where a listed word occurs, the normal path
+        everywhere else (and whenever the splice cannot be lined up)."""
+        native, english = self._g2p(lang_code), self._g2p(english_accent)
+        pipeline = self._model._get_pipeline(lang_code)
         pieces = []
-        for result in self._model.generate(text=text, voice=voice_file, lang_code=lang_code, speed=speed):
-            pieces.append(np.asarray(result.audio, dtype=np.float32).reshape(-1))
-        if not pieces:
-            return b""
-        audio = np.clip(np.concatenate(pieces), -1.0, 1.0)
-        return (audio * 32767.0).astype("<i2").tobytes()
+        for sentence in kokoro_language.split_sentences(text) or [text]:
+            phonemes = kokoro_loanwords.splice(sentence, entries, native, english)
+            if phonemes and len(phonemes) <= MAX_PHONEMES:
+                for result in pipeline.generate_from_tokens(phonemes, voice=voice_file, speed=speed,
+                                                            model=self._model):
+                    pieces.append(result.output.audio)
+            else:
+                pieces.extend(result.audio for result in self._model.generate(
+                    text=sentence, voice=voice_file, lang_code=lang_code, speed=speed))
+        return _to_pcm(pieces)
+
+
+def _to_pcm(pieces: list) -> bytes:
+    import numpy as np
+    arrays = [np.asarray(p, dtype=np.float32).reshape(-1) for p in pieces]
+    if not arrays:
+        return b""
+    audio = np.clip(np.concatenate(arrays), -1.0, 1.0)
+    return (audio * 32767.0).astype("<i2").tobytes()
 
 
 def download(repo: str, revision: str, local_files_only: bool = False) -> Path:
@@ -212,6 +252,14 @@ def make_handler(engine: Engine, default_voice: str) -> type[BaseHTTPRequestHand
             fmt = fmt.lower()
             if lang_override is not None and not isinstance(lang_override, str):
                 return self._error(HTTPStatus.BAD_REQUEST, "'lang_code' must be a string")
+            english_words = req.get("english_words") or []
+            if not isinstance(english_words, list) or len(english_words) > MAX_ENGLISH_WORDS \
+                    or not all(isinstance(w, str) and len(w) <= 64 for w in english_words):
+                return self._error(HTTPStatus.BAD_REQUEST,
+                                   f"'english_words' must be a list of at most {MAX_ENGLISH_WORDS} short strings")
+            english_accent = req.get("english_accent") or "a"
+            if english_accent not in ENGLISH_CODES:
+                return self._error(HTTPStatus.BAD_REQUEST, "'english_accent' must be 'a' (US) or 'b' (UK)")
             try:
                 speed = float(req.get("speed") or 1.0)
                 if not 0.25 <= speed <= 4.0:
@@ -232,7 +280,7 @@ def make_handler(engine: Engine, default_voice: str) -> type[BaseHTTPRequestHand
                 log.error("voice lookup failed: %s", type(exc).__name__)
                 return self._error(HTTPStatus.SERVICE_UNAVAILABLE, f"voice lookup failed: {type(exc).__name__}")
             try:
-                pcm = engine.synthesize(text, voice, lang, speed)
+                pcm = engine.synthesize(text, voice, lang, speed, english_words, english_accent)
             except NotReady as exc:
                 return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             except Exception as exc:

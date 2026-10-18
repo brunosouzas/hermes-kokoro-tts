@@ -52,6 +52,19 @@ hermes kokoro install                                                        # l
 
 A reply in English is spoken by `bf_emma`, one in Portuguese by `pf_dora`, and a mixed reply switches at sentence boundaries. A sentence with no clear language (a name, a number) keeps the previous voice. Detection counts common function words and accents. It is built into the plugin, needs no extra package, and currently tells Portuguese from English. It works on whole sentences: an English word inside a Portuguese sentence ("o pipeline terminou") still gets the Portuguese pronunciation, because switching voices mid-sentence sounds worse than an accent. Setting `tts.voice` turns switching off.
 
+### English words inside other languages
+
+Switching voices fixes whole sentences, but a Portuguese sentence full of English terms ("o pipeline terminou e o card está no board") still gets those words pronounced as if they were Portuguese. Keep a dictionary of English words and the **same voice** says them in English, with no change of voice mid-sentence:
+
+```sh
+hermes kokoro words add pipeline card deploy merge board "pull request"
+hermes kokoro words                      # list
+hermes kokoro words remove board
+hermes config set plugins.entries.kokoro-tts.settings.english_accent b   # British; default a (American)
+```
+
+No list can know in advance which words you use, so it is meant to grow: when you hear a word come out wrong, add it. Changes apply to the next reply without a restart. Matching is case-insensitive, whole-word, and also covers plurals with -s ("cards", "pull requests"). How it works: the sentence is phonemized in the voice's own language, and only the listed words get English phonemes (from Kokoro's English pronunciation lexicon). A word the English lexicon does not know keeps the original pronunciation. The dictionary applies to non-English voices; English voices already say these words in English.
+
 Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for `voice` and every voice in `voices`, so run `hermes kokoro install` again after changing either. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
 
 Languages tested by the author: Brazilian Portuguese and English. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
@@ -64,6 +77,8 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 |---|---|---|
 | `voice` | `af_heart` | Kokoro voice id |
 | `voices` | empty | Voice per detected language, e.g. `{pt: pf_dora, en: bf_emma}` (see *A voice per language*) |
+| `english_words` | empty | Words and short phrases a non-English voice says in English (see *English words inside other languages*) |
+| `english_accent` | `a` | Pronunciation of `english_words`: `a` American, `b` British |
 | `language` | empty | Single-voice mode: read text in another language with the same voice (`p`, `pt-br`, `e`, …). Empty = the voice's language |
 | `speed` | `1.0` | 0.25 to 4.0 |
 | `port` | `8770` | Loopback port of the server |
@@ -78,6 +93,7 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 | `hermes kokoro restart` | Restart the server |
 | `hermes kokoro voices` | List installed voices |
 | `hermes kokoro say "text" [--voice id]` | Synthesize a test sentence to a WAV file |
+| `hermes kokoro words [list\|add\|remove] [WORD ...]` | Manage the English-words dictionary |
 | `hermes kokoro uninstall [--purge]` | Stop and remove the launchd agent; `--purge` also deletes the environment and the model |
 
 ## What it reads, sends and writes

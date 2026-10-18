@@ -175,6 +175,75 @@ def test_offline_package_check(monkeypatch):
     ks.check_offline_packages()
 
 
+@pytest.mark.parametrize("payload", [
+    {"input": "x", "english_words": "pipeline"},
+    {"input": "x", "english_words": [1, 2]},
+    {"input": "x", "english_words": ["x" * 65]},
+    {"input": "x", "english_words": ["w"] * (ks.MAX_ENGLISH_WORDS + 1)},
+    {"input": "x", "english_accent": "au"},
+])
+def test_english_words_are_validated(server, payload):
+    url, model, _ = server
+    assert error_of(url, payload)[0] == 400 and model.calls == []
+
+
+class FakePipeline:
+    def __init__(self, calls):
+        self.calls = calls
+
+    def g2p(self, text):
+        import re
+        return " ".join("P:" + w for w in re.findall(r"[^\W\d_]+[.,!?]*|\d+[.,!?]*", text)), None
+
+    def generate_from_tokens(self, phonemes, voice, speed, model):
+        self.calls.append({"phonemes": phonemes, "voice": voice})
+
+        class Out:
+            audio = np.full(2400, 0.25, dtype=np.float32)
+
+        class Result:
+            output = Out()
+        yield Result()
+
+
+class LoanwordModel(FakeModel):
+    def __init__(self):
+        super().__init__()
+        self.token_calls = []
+
+    def _get_pipeline(self, lang):
+        return FakePipeline(self.token_calls)
+
+
+@pytest.fixture
+def loan_server(snapshot):
+    model = LoanwordModel()
+    engine = ks.Engine("repo/x", "a" * 40, loader=lambda: model, snapshot=snapshot)
+    engine.load()
+    httpd = ks.serve(engine, "127.0.0.1", 0, "af_heart")
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}", model
+    httpd.shutdown()
+
+
+def test_listed_words_are_spliced_per_sentence_and_the_rest_is_normal(loan_server, snapshot):
+    url, model = loan_server
+    text = "O pipeline terminou. Nada mais hoje."
+    with post(url, {"input": text, "voice": "pf_dora", "response_format": "pcm",
+                    "english_words": ["pipeline"], "english_accent": "b"}) as resp:
+        body = resp.read()
+    assert model.token_calls == [{"phonemes": "P:O P:pipeline P:terminou.",
+                                  "voice": str(snapshot / "voices" / "pf_dora.safetensors")}]
+    assert [c["text"] for c in model.calls] == ["Nada mais hoje."]  # no listed word: normal path
+    assert len(body) == (2400 + 4800) * 2
+
+
+def test_english_voice_ignores_the_dictionary(loan_server):
+    url, model = loan_server
+    post(url, {"input": "The pipeline is green.", "voice": "af_heart", "english_words": ["pipeline"]}).read()
+    assert model.token_calls == [] and model.calls[-1]["text"] == "The pipeline is green."
+
+
 def test_invalid_json(server):
     url, _model, _ = server
     assert error_of(url, None, raw=b"{nope")[0] == 400

@@ -16,6 +16,6 @@ def register(ctx) -> None:
         name="kokoro",
         help="Manage the local Kokoro text-to-speech server",
         setup_fn=setup_parser,
-        handler_fn=make_handler(setting, lambda: KokoroTTSProvider(setting)),
+        handler_fn=make_handler(setting, lambda: KokoroTTSProvider(setting), save=getattr(ctx, "set_config", None)),
         description="Install, check and test the local Kokoro server used by tts.provider: kokoro-mlx.",
     )

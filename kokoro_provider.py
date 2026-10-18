@@ -15,12 +15,14 @@ from agent.tts_provider import TTSProvider
 
 from . import kokoro_language as language
 from . import kokoro_voices as voices
+from .kokoro_loanwords import MAX_ENTRIES
 from .kokoro_service import DEFAULT_LABEL, LOOPBACK_OPENER, parse_port
 
 SAMPLE_RATE = 24000
 CONNECT_TIMEOUT = 0.25
 REQUEST_TIMEOUT = 120.0
 STREAM_CHUNK = 8192
+MAX_ENGLISH_WORDS = MAX_ENTRIES  # the server applies the same limit
 
 Setting = Callable[[str, Any], Any]
 
@@ -132,6 +134,19 @@ class KokoroTTSProvider(TTSProvider):
         return {str(lang).strip().lower(): voice for lang, voice in raw.items()
                 if str(lang).strip().lower() in language.SUPPORTED and voices.is_valid_voice_id(voice)}
 
+    def english_words(self) -> list[str]:
+        """``settings.english_words``: words and short phrases a non-English voice should say in
+        English ("pipeline", "pull request"). Read on every request, so additions apply at once."""
+        raw = self._setting("english_words", None)
+        if not isinstance(raw, list):
+            return []
+        clean = [w.strip() for w in raw if isinstance(w, str) and w.strip() and len(w.strip()) <= 64]
+        return list(dict.fromkeys(clean))[:MAX_ENGLISH_WORDS]
+
+    def english_accent(self) -> str:
+        accent = str(self._setting("english_accent", "a") or "a").strip().lower()
+        return {"us": "a", "uk": "b", "gb": "b"}.get(accent, accent if accent in ("a", "b") else "a")
+
     def _runs(self, text: str, voice: Optional[str]) -> list[tuple[str, str, bool]]:
         """``(text, voice, auto)`` requests for ``text``. An explicit voice (``tts.voice``) or an
         empty ``voices`` map keeps today's single-voice behaviour."""
@@ -177,8 +192,13 @@ class KokoroTTSProvider(TTSProvider):
     def _post(self, text: str, voice: Optional[str], speed: Optional[float], fmt: str, timeout: float,
               auto: bool = False):
         chosen = self._resolve_voice(voice)
+        lang = self._lang(chosen, auto)
         payload = {"input": text, "voice": chosen, "speed": self._speed(speed), "response_format": fmt,
-                   "lang_code": self._lang(chosen, auto)}
+                   "lang_code": lang}
+        words = self.english_words()
+        if words and lang not in ("a", "b"):
+            payload["english_words"] = words
+            payload["english_accent"] = self.english_accent()
         req = urllib.request.Request(f"{self.base_url}/v1/audio/speech", data=json.dumps(payload).encode(),
                                      headers={"Content-Type": "application/json"}, method="POST")
         try:

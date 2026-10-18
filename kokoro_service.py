@@ -21,7 +21,8 @@ from typing import Callable, Optional
 from xml.sax.saxutils import escape
 
 PLUGIN_ROOT = Path(__file__).resolve().parent
-SERVER_SOURCES = (PLUGIN_ROOT / "server" / "kokoro_server.py", PLUGIN_ROOT / "kokoro_voices.py")
+SERVER_SOURCES = (PLUGIN_ROOT / "server" / "kokoro_server.py", PLUGIN_ROOT / "kokoro_voices.py",
+                  PLUGIN_ROOT / "kokoro_language.py", PLUGIN_ROOT / "kokoro_loanwords.py")
 REQUIREMENTS = PLUGIN_ROOT / "server" / "requirements.lock"
 
 # Reviewed model pin: changing it is a code change, not a setting.

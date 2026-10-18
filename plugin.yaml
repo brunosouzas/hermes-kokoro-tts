@@ -2,7 +2,7 @@ name: kokoro-tts
 version: 0.3.0
 manifest_version: 2
 api_version: 1
-description: "Local Kokoro text-to-speech on Apple Silicon (MLX): tts.provider kokoro-mlx, 9 languages, a voice per language (switches per sentence between Portuguese and English), sentence streaming, nothing leaves the machine."
+description: "Local Kokoro text-to-speech on Apple Silicon (MLX): tts.provider kokoro-mlx, 9 languages, a voice per language (switches per sentence between Portuguese and English), a dictionary of English words the same voice pronounces in English, sentence streaming, nothing leaves the machine."
 author: "Bruno Souza (@brunosouzas)"
 license: MIT
 homepage: https://github.com/brunosouzas/hermes-kokoro-tts
@@ -29,6 +29,16 @@ config_schema:
     default: {}
     label: Voice per language
     description: "Optional map from a detected language to a voice, e.g. {pt: pf_dora, en: bf_emma}. Each sentence is spoken by the voice of its language; sentences with no clear language keep the previous voice. Detects pt and en. Empty = always use `voice`. Ignored when tts.voice is set. Run `hermes kokoro install` again after changing it so the server loads these voices at start-up."
+  english_words:
+    type: list
+    default: []
+    label: English words
+    description: "Words and short phrases a non-English voice should say in English, e.g. [pipeline, card, deploy, \"pull request\"]. The same voice keeps speaking; only these words get English pronunciation. Plurals with -s match too. Grow it as you listen: `hermes kokoro words add WORD`. Applies to the next reply, no restart."
+  english_accent:
+    type: str
+    default: a
+    label: Accent of English words
+    description: "a = American, b = British pronunciation for english_words."
   language:
     type: str
     default: ""
