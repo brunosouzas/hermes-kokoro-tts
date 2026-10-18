@@ -323,6 +323,20 @@ def test_words_command_adds_removes_and_saves(tmp_path):
     assert handler(Namespace(kokoro_command="words", action="add", entries=[])) == 2
 
 
+def test_words_command_rejects_what_synthesis_would_ignore():
+    from argparse import Namespace
+    from kokoro_tts import kokoro_cli, kokoro_loanwords
+    store = {}
+    store["english_words"] = [f"word{chr(97 + i % 26)}{chr(97 + i // 26 % 26)}" for i in range(kokoro_loanwords.MAX_ENTRIES - 1)]
+    handler = kokoro_cli.make_handler(lambda k, d=None: store.get(k, d), lambda: None,
+                                      save=lambda k, v: store.__setitem__(k, v))
+    code = handler(Namespace(kokoro_command="words", action="add",
+                             entries=["4.9", "one two three four five", "x" * 65, "fits", "toomany"]))
+    assert code == 1
+    assert store["english_words"][-1] == "fits" and len(store["english_words"]) == kokoro_loanwords.MAX_ENTRIES
+    assert "toomany" not in store["english_words"] and "4.9" not in store["english_words"]
+
+
 def test_bad_settings_fall_back_to_defaults(fake_server):
     p = provider(fake_server, voice="../x", speed="fast")
     assert p.default_voice() == "af_heart" and p._speed(None) == 1.0

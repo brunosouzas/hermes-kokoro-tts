@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import kokoro_loanwords as loanwords
 from . import kokoro_service as service
 from . import kokoro_voices as voices
 
@@ -45,20 +46,27 @@ def setup_parser(subparser) -> None:
     words.add_argument("entries", nargs="*", help='words or quoted phrases, e.g. pipeline "pull request"')
 
 
-def update_words(current: Any, action: str, entries: list[str]) -> list[str]:
-    """New dictionary after ``add``/``remove``; case-insensitive, order kept, no duplicates."""
+def update_words(current: Any, action: str, entries: list[str]) -> tuple[list[str], list[str]]:
+    """``(dictionary, rejected)`` after ``add``/``remove``: case-insensitive, order kept, no
+    duplicates. An addition the synthesizer would ignore (numbers, more than four words, over
+    64 characters, past the size limit) is rejected here instead of being saved silently."""
     words = [w for w in (current if isinstance(current, list) else []) if isinstance(w, str) and w.strip()]
+    rejected: list[str] = []
     if action == "add":
         known = {w.strip().lower() for w in words}
         for entry in entries:
             clean = " ".join(entry.split())
-            if clean and len(clean) <= 64 and clean.lower() not in known:
-                words.append(clean)
-                known.add(clean.lower())
+            if clean.lower() in known:
+                continue
+            if len(clean) > 64 or loanwords.entry_words(clean) is None or len(words) >= loanwords.MAX_ENTRIES:
+                rejected.append(entry)
+                continue
+            words.append(clean)
+            known.add(clean.lower())
     elif action == "remove":
         drop = {" ".join(e.split()).lower() for e in entries}
         words = [w for w in words if w.strip().lower() not in drop]
-    return words
+    return words, rejected
 
 
 def make_handler(setting: Setting, provider_factory: Callable[[], Any],
@@ -94,7 +102,7 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any],
             elif cmd == "words":
                 current = setting("english_words", None)
                 if args.action == "list":
-                    words = update_words(current, "list", [])
+                    words, _ = update_words(current, "list", [])
                     print("\n".join(words) if words else "No English words yet. Add some: "
                           'hermes kokoro words add pipeline "pull request"')
                     return 0
@@ -105,9 +113,13 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any],
                     print("error: this Hermes cannot save plugin settings from here; edit "
                           "plugins.entries.kokoro-tts.settings.english_words in config.yaml")
                     return 1
-                words = update_words(current, args.action, args.entries)
+                words, rejected = update_words(current, args.action, args.entries)
                 save("english_words", words)
+                for entry in rejected:
+                    print(f"skipped {entry!r}: entries are 1 to {loanwords.MAX_ENTRY_WORDS} words of letters, "
+                          f"at most 64 characters, and the dictionary holds {loanwords.MAX_ENTRIES}")
                 print(f"{len(words)} English word(s). Changes apply to the next reply; no restart needed.")
+                return 1 if rejected else 0
             else:
                 print("Usage: hermes kokoro {install|status|restart|voices|say|words|uninstall}")
                 return 2

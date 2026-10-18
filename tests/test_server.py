@@ -188,12 +188,16 @@ def test_english_words_are_validated(server, payload):
 
 
 class FakePipeline:
-    def __init__(self, calls):
+    """Tags every phoneme word with the pipeline's language, so a test can see which language
+    produced which word."""
+
+    def __init__(self, calls, lang):
         self.calls = calls
+        self.lang = lang
 
     def g2p(self, text):
         import re
-        return " ".join("P:" + w for w in re.findall(r"[^\W\d_]+[.,!?]*|\d+[.,!?]*", text)), None
+        return " ".join(f"{self.lang}:" + w.lower() for w in re.findall(r"[^\W\d_]+[.,!?]*|\d+[.,!?]*", text)), None
 
     def generate_from_tokens(self, phonemes, voice, speed, model):
         self.calls.append({"phonemes": phonemes, "voice": voice})
@@ -212,7 +216,7 @@ class LoanwordModel(FakeModel):
         self.token_calls = []
 
     def _get_pipeline(self, lang):
-        return FakePipeline(self.token_calls)
+        return FakePipeline(self.token_calls, lang)
 
 
 @pytest.fixture
@@ -232,10 +236,26 @@ def test_listed_words_are_spliced_per_sentence_and_the_rest_is_normal(loan_serve
     with post(url, {"input": text, "voice": "pf_dora", "response_format": "pcm",
                     "english_words": ["pipeline"], "english_accent": "b"}) as resp:
         body = resp.read()
-    assert model.token_calls == [{"phonemes": "P:O P:pipeline P:terminou.",
+    # Portuguese phonemes around, British English for the listed word, same Dora voice.
+    assert model.token_calls == [{"phonemes": "p:o b:pipeline p:terminou.",
                                   "voice": str(snapshot / "voices" / "pf_dora.safetensors")}]
     assert [c["text"] for c in model.calls] == ["Nada mais hoje."]  # no listed word: normal path
     assert len(body) == (2400 + 4800) * 2
+
+
+def test_us_accent_is_used_when_asked(loan_server):
+    url, model = loan_server
+    post(url, {"input": "O pipeline.", "voice": "pf_dora", "english_words": ["pipeline"],
+               "english_accent": "a"}).read()
+    assert model.token_calls[-1]["phonemes"] == "p:o a:pipeline."
+
+
+def test_spliced_sentence_over_the_phoneme_limit_uses_normal_synthesis(loan_server):
+    url, model = loan_server
+    filler = " ".join(["palavra"] * 60)  # 60 x "p:palavra " is well over 510 phoneme characters
+    sentence = f"O pipeline {filler}."
+    post(url, {"input": sentence, "voice": "pf_dora", "english_words": ["pipeline"]}).read()
+    assert model.token_calls == [] and model.calls[-1]["text"] == sentence
 
 
 def test_english_voice_ignores_the_dictionary(loan_server):
