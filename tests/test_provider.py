@@ -146,6 +146,11 @@ def test_proxy_environment_is_ignored_for_loopback(fake_server, tmp_path, monkey
         monkeypatch.setenv(var, "http://proxy.invalid:3128")
     for var in ("no_proxy", "NO_PROXY"):
         monkeypatch.delenv(var, raising=False)
+    # urlopen() caches a global opener whose proxies were read earlier; drop it so the
+    # environment above would apply to any code path that still uses the default opener.
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "_opener", None)
+    monkeypatch.setattr(urllib.request, "proxy_bypass", lambda host: False)
     p = provider(fake_server)
     p.synthesize("private words", str(tmp_path / "a.wav"))
     assert Recorder.requests[-1]["input"] == "private words"
