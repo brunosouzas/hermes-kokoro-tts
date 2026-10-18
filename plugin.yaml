@@ -7,7 +7,7 @@ author: "Bruno Souza (@brunosouzas)"
 license: MIT
 homepage: https://github.com/brunosouzas/hermes-kokoro-tts
 tags: [tts, voice, local, mlx, kokoro, apple-silicon]
-requires_hermes: ">=0.21.5"
+requires_hermes: ">=0.22.2"
 platforms: [macos]
 # The Kokoro server runs in its own virtual environment (built by `hermes kokoro install`);
 # the plugin itself uses only the standard library inside Hermes.
