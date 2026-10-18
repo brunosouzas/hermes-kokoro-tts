@@ -49,6 +49,12 @@ def test_split_sentences_edge_cases(text, expected):
     assert lang.split_sentences(text) == expected
 
 
+def test_punctuation_inside_inline_code_neither_splits_nor_switches():
+    text = "Leia `the and. is are were` agora. Depois volte."
+    assert lang.split_sentences(text) == ["Leia `the and. is are were` agora.", "Depois volte."]
+    assert lang.plan(text, VOICES, "pf_dora") == [(text, "pf_dora")]
+
+
 def test_abbreviation_does_not_switch_voice_mid_sentence():
     assert lang.plan("O Dr. Brown me ligou hoje.", VOICES, "pf_dora") == [("O Dr. Brown me ligou hoje.", "pf_dora")]
 

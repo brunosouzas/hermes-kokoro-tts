@@ -77,10 +77,18 @@ def _is_abbreviation(text_before: str) -> bool:
     return token in _ABBREVIATIONS or initial or ("." in token and len(token) <= 5 and token[0].isalpha())
 
 
+_INLINE_CODE = re.compile(r"`[^`\n]*`")
+
+
 def split_sentences(text: str) -> list[str]:
     parts: list[str] = []
     start = 0
+    # Never cut inside inline code: its punctuation is not prose. (URLs, paths and addresses
+    # contain no whitespace, so a boundary, which needs whitespace, cannot fall inside them.)
+    code = [m.span() for m in _INLINE_CODE.finditer(text)]
     for match in _BOUNDARY.finditer(text):
+        if any(lo <= match.start() < hi for lo, hi in code):
+            continue
         punct = match.group(1)
         if punct and punct.startswith(".") and len(punct.rstrip("\"'”’)]")) == 1 \
                 and _is_abbreviation(text[start:match.start()]):
