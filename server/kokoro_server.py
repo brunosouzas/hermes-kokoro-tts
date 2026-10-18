@@ -266,6 +266,8 @@ def main(argv: Optional[list[str]] = None) -> None:
     parser.add_argument("--model", required=True)
     parser.add_argument("--revision", required=True)
     parser.add_argument("--default-voice", default=kokoro_voices.DEFAULT_VOICE)
+    parser.add_argument("--prime", action="append", default=[], metavar="VOICE",
+                        help="also load this voice's language pipeline at start-up (repeatable)")
     parser.add_argument("--download", action="store_true", help="download the pinned model and exit (installer)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -281,13 +283,15 @@ def main(argv: Optional[list[str]] = None) -> None:
     def load_and_prime() -> None:
         engine.load()
         # The language pipeline (G2P, and for English spaCy and torch) loads on first use and can
-        # take tens of seconds; pay that at start-up for the default voice, not on the first reply.
-        if engine.loaded and kokoro_voices.is_valid_voice_id(args.default_voice):
+        # take tens of seconds; pay that at start-up for every configured voice, not on a reply.
+        for voice in dict.fromkeys([args.default_voice, *args.prime]):
+            if not (engine.loaded and kokoro_voices.is_valid_voice_id(voice)):
+                continue
             try:
-                engine.synthesize(".", args.default_voice, kokoro_voices.lang_code_for(args.default_voice), 1.0)
-                log.info("pipeline primed for %s", args.default_voice)
+                engine.synthesize(".", voice, kokoro_voices.lang_code_for(voice), 1.0)
+                log.info("pipeline primed for %s", voice)
             except Exception as exc:
-                log.warning("priming failed: %s", type(exc).__name__)
+                log.warning("priming %s failed: %s", voice, type(exc).__name__)
 
     threading.Thread(target=load_and_prime, name="kokoro-load", daemon=True).start()
     log.info("listening on http://%s:%d", args.host, args.port)

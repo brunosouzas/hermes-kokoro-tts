@@ -177,6 +177,57 @@ def test_provider_and_installer_agree_on_ports():
         assert KokoroTTSProvider(lookup).port == kokoro_cli.service_config(lookup).port
 
 
+BILINGUAL = {"voice": "pf_dora", "voices": {"pt": "pf_dora", "en": "bf_emma"}}
+MIXED = "Olá, Bruno. O deploy terminou. The pipeline is green and the tests passed."
+
+
+def test_synthesize_uses_one_voice_per_language_and_joins_the_audio(fake_server, tmp_path):
+    written = provider(fake_server, **BILINGUAL).synthesize(MIXED, str(tmp_path / "a.wav"))
+    sent = [(r["input"], r["voice"], r["lang_code"], r["response_format"]) for r in Recorder.requests]
+    assert sent == [("Olá, Bruno. O deploy terminou.", "pf_dora", "p", "pcm"),
+                    ("The pipeline is green and the tests passed.", "bf_emma", "b", "pcm")]
+    with wave.open(written) as w:
+        assert w.getframerate() == 24000 and w.getnframes() == 2 * 2400
+
+
+def test_stream_uses_one_request_per_language_run(fake_server):
+    chunks = list(provider(fake_server, **BILINGUAL).stream(MIXED, format="pcm"))
+    assert b"".join(chunks) == PCM * 2
+    assert [r["voice"] for r in Recorder.requests] == ["pf_dora", "bf_emma"]
+
+
+def test_single_language_text_is_one_request(fake_server, tmp_path):
+    provider(fake_server, **BILINGUAL).synthesize("The pipeline is green.", str(tmp_path / "a.wav"))
+    assert [(r["voice"], r["response_format"]) for r in Recorder.requests] == [("bf_emma", "wav")]
+
+
+def test_explicit_voice_turns_switching_off(fake_server, tmp_path):
+    provider(fake_server, **BILINGUAL).synthesize(MIXED, str(tmp_path / "a.wav"), voice="pm_alex")
+    assert [r["voice"] for r in Recorder.requests] == ["pm_alex"]
+
+
+def test_language_override_is_ignored_in_per_language_mode(fake_server, tmp_path):
+    provider(fake_server, language="e", **BILINGUAL).synthesize(MIXED, str(tmp_path / "a.wav"))
+    assert [r["lang_code"] for r in Recorder.requests] == ["p", "b"]
+
+
+def test_invalid_voice_map_entries_are_ignored(fake_server):
+    p = provider(fake_server, voice="pf_dora", voices={"en": "../x", "PT": "pf_dora", "klingon": "af_heart"})
+    assert p.language_voices() == {"pt": "pf_dora"}
+    assert provider(fake_server, voices="en=bf_emma").language_voices() == {}
+
+
+def test_warm_primes_each_configured_voice_once(fake_server):
+    p = provider(fake_server, **BILINGUAL)
+    p.warm()
+    import time
+    for _ in range(50):
+        if len(Recorder.requests) >= 2:
+            break
+        time.sleep(0.05)
+    assert [r["voice"] for r in Recorder.requests] == ["pf_dora", "bf_emma"]
+
+
 def test_bad_settings_fall_back_to_defaults(fake_server):
     p = provider(fake_server, voice="../x", speed="fast")
     assert p.default_voice() == "af_heart" and p._speed(None) == 1.0

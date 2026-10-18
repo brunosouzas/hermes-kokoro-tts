@@ -17,7 +17,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent
 HERMES_AGENT_REPO = Path(os.environ.get("HERMES_AGENT_REPO") or Path.home() / ".hermes" / "hermes-agent").expanduser()
 
-collect_ignore = ["__init__.py", "kokoro_cli.py", "kokoro_provider.py", "kokoro_service.py", "kokoro_voices.py",
+collect_ignore = ["__init__.py", "kokoro_cli.py", "kokoro_provider.py", "kokoro_service.py", "kokoro_voices.py", "kokoro_language.py",
                   "server"]
 
 

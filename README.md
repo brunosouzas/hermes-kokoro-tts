@@ -39,7 +39,20 @@ The first letter of a voice id is its language (`a` US English, `b` UK English, 
 
 If `tts.voice` is set in your Hermes config, it wins over the plugin setting.
 
-Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for the configured voice, so run `hermes kokoro install` again after changing `voice`. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
+### A voice per language
+
+Kokoro reads text with the pronunciation rules of the voice's language, so English read by a Portuguese voice sounds wrong (and the other way round). Give each language its own voice and the plugin picks one per sentence:
+
+```sh
+hermes config set plugins.entries.kokoro-tts.settings.voice pf_dora          # default voice
+hermes config set plugins.entries.kokoro-tts.settings.voices.pt pf_dora
+hermes config set plugins.entries.kokoro-tts.settings.voices.en bf_emma
+hermes kokoro install                                                        # loads both voices at start-up
+```
+
+A reply in English is spoken by `bf_emma`, one in Portuguese by `pf_dora`, and a mixed reply switches at sentence boundaries. A sentence with no clear language (a name, a number) keeps the previous voice. Detection counts common function words and accents. It is built into the plugin, needs no extra package, and currently tells Portuguese from English. It works on whole sentences: an English word inside a Portuguese sentence ("o pipeline terminou") still gets the Portuguese pronunciation, because switching voices mid-sentence sounds worse than an accent. Setting `tts.voice` turns switching off.
+
+Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for `voice` and every voice in `voices`, so run `hermes kokoro install` again after changing either. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
 
 Languages tested by the author: Brazilian Portuguese and English. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
 
@@ -50,7 +63,8 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 | Key | Default | Meaning |
 |---|---|---|
 | `voice` | `af_heart` | Kokoro voice id |
-| `language` | empty | Read text in another language with the same voice (`p`, `pt-br`, `e`, …). Empty = the voice's language |
+| `voices` | empty | Voice per detected language, e.g. `{pt: pf_dora, en: bf_emma}` (see *A voice per language*) |
+| `language` | empty | Single-voice mode: read text in another language with the same voice (`p`, `pt-br`, `e`, …). Empty = the voice's language |
 | `speed` | `1.0` | 0.25 to 4.0 |
 | `port` | `8770` | Loopback port of the server |
 | `service_dir` | `~/Library/Application Support/hermes-kokoro-tts` | Server environment, model cache and log |

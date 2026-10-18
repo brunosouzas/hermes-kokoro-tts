@@ -8,16 +8,24 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import kokoro_service as service
+from . import kokoro_voices as voices
 
 Setting = Callable[[str, Any], Any]
 
 
 def service_config(setting: Setting) -> service.ServiceConfig:
     raw_dir = setting("service_dir", "") or ""
+    default_voice = setting("voice", "af_heart") or "af_heart"
+    if not voices.is_valid_voice_id(default_voice):
+        default_voice = "af_heart"
+    raw_map = setting("voices", None)
+    mapped = raw_map.values() if isinstance(raw_map, dict) else ()
+    prime = tuple(dict.fromkeys(v for v in mapped if voices.is_valid_voice_id(v) and v != default_voice))
     return service.ServiceConfig(
         port=service.parse_port(setting("port", None)),
         service_dir=Path(raw_dir).expanduser() if raw_dir else service.DEFAULT_SERVICE_DIR,
-        default_voice=setting("voice", "af_heart") or "af_heart",
+        default_voice=default_voice,
+        prime_voices=prime,
     )
 
 

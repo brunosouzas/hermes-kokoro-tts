@@ -82,6 +82,18 @@ def test_uninstall_purge(cfg):
     assert not cfg.plist_path.exists() and not cfg.service_dir.exists()
 
 
+def test_plist_primes_extra_voices(cfg):
+    cfg.prime_voices = ("bf_emma",)
+    args = plistlib.loads(svc.render_plist(cfg).encode())["ProgramArguments"]
+    assert args[args.index("--prime") + 1] == "bf_emma"
+
+
+def test_cli_config_primes_mapped_voices_once():
+    values = {"voice": "pf_dora", "voices": {"pt": "pf_dora", "en": "bf_emma", "x": "../bad"}}
+    cfg = kokoro_cli.service_config(lambda k, d=None: values.get(k, d))
+    assert cfg.default_voice == "pf_dora" and cfg.prime_voices == ("bf_emma",)
+
+
 def test_cli_config_from_settings(tmp_path):
     values = {"port": "8801", "service_dir": str(tmp_path / "s"), "voice": "pf_dora"}
     cfg = kokoro_cli.service_config(lambda k, d=None: values.get(k, d))
