@@ -62,7 +62,19 @@ def provider(port, **settings):
 
 def test_identity_and_streaming_contract(fake_server):
     p = provider(fake_server)
-    assert p.name == "kokoro" and p.streams_pcm is True and p.stream_sample_rate == 24000
+    assert p.name == "kokoro-mlx" and p.streams_pcm is True and p.stream_sample_rate == 24000
+
+
+def test_provider_name_does_not_shadow_a_builtin():
+    # Hermes ignores a plugin provider whose name is a built-in; "kokoro" itself is proposed as one.
+    p = provider(8770)
+    reserved = {"kokoro"}
+    try:
+        from agent.tts_registry import _BUILTIN_NAMES
+        reserved |= set(_BUILTIN_NAMES)
+    except Exception:
+        pass
+    assert p.name not in reserved
 
 
 def test_is_available_means_installed_and_never_touches_the_network(tmp_path, monkeypatch):

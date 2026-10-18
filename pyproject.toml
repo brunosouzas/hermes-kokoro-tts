@@ -1,6 +1,6 @@
 [project]
 name = "hermes-kokoro-tts"
-version = "0.1.0"
+version = "0.2.0"
 description = "Hermes Agent plugin: local Kokoro text-to-speech on Apple Silicon (MLX)"
 readme = "README.md"
 license = { text = "MIT" }

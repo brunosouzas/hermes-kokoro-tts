@@ -29,7 +29,7 @@ class KokoroServerError(RuntimeError):
 
 
 class KokoroTTSProvider(TTSProvider):
-    """``tts.provider: kokoro``. Settings live under ``plugins.entries.kokoro-tts.settings``."""
+    """``tts.provider: kokoro-mlx``. Settings live under ``plugins.entries.kokoro-tts.settings``."""
 
     streams_pcm = True
     stream_sample_rate = SAMPLE_RATE
@@ -40,7 +40,7 @@ class KokoroTTSProvider(TTSProvider):
     # ---- identity ---------------------------------------------------------------------------
     @property
     def name(self) -> str:
-        return "kokoro"
+        return "kokoro-mlx"
 
     @property
     def display_name(self) -> str:
