@@ -42,6 +42,36 @@ def _wav(pcm: bytes) -> bytes:
     return buf.getvalue()
 
 
+class _PCMStream:
+    """Iterator over a reply's PCM that owns the eagerly opened first response: ``close()``
+    releases it even when the consumer stops (barge-in) before reading a single chunk."""
+
+    def __init__(self, first: Any, chunks: Iterator[bytes]):
+        self._first = first
+        self._chunks = chunks
+
+    def __iter__(self) -> "_PCMStream":
+        return self
+
+    def __next__(self) -> bytes:
+        return next(self._chunks)
+
+    def close(self) -> None:
+        try:
+            self._chunks.close()  # type: ignore[attr-defined]
+        finally:
+            try:
+                self._first.close()
+            except Exception:
+                pass
+
+    def __del__(self) -> None:
+        try:
+            self.close()
+        except Exception:
+            pass
+
+
 class KokoroTTSProvider(TTSProvider):
     """``tts.provider: kokoro-mlx``. Settings live under ``plugins.entries.kokoro-tts.settings``."""
 
@@ -182,9 +212,11 @@ class KokoroTTSProvider(TTSProvider):
             pcm = bytearray()
             for part, chosen, auto in runs:
                 with self._post(part, chosen, speed, "pcm", REQUEST_TIMEOUT, auto) as resp:
-                    pcm += resp.read()
-            if not pcm:
-                raise KokoroServerError("Kokoro server returned no audio")
+                    audio = resp.read()
+                # A silent run would otherwise produce a "successful" file missing that sentence.
+                if not audio:
+                    raise KokoroServerError("Kokoro server returned no audio for part of the text")
+                pcm += audio
             data = _wav(bytes(pcm))
         tmp = path.with_name(path.name + ".part")
         tmp.write_bytes(data)
@@ -216,17 +248,23 @@ class KokoroTTSProvider(TTSProvider):
                         if not block:
                             break
                         yield block
-        return chunks()
+        return _PCMStream(first, chunks())
 
     def warm(self) -> None:
         """Speech was just turned on: synthesize a short phrase in the background so the
         configured voice's language pipeline is loaded before the first reply."""
-        targets = [self.default_voice()] + list(self.language_voices().values())
+        mapping = self.language_voices()
+        if mapping:
+            # Each distinct voice once, in its own language.
+            targets = [(v, True) for v in dict.fromkeys([self.default_voice(), *mapping.values()])]
+        else:
+            # Single-voice mode: warm exactly what synthesis will use, language override included.
+            targets = [(None, False)]
 
         def _prime() -> None:
-            for voice in dict.fromkeys(targets):  # each distinct voice once, in order
+            for voice, auto in targets:
                 try:
-                    with self._post(".", voice, None, "pcm", 60.0, auto=True) as resp:
+                    with self._post(".", voice, None, "pcm", 60.0, auto=auto) as resp:
                         resp.read()
                 except Exception:
                     pass

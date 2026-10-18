@@ -228,6 +228,74 @@ def test_warm_primes_each_configured_voice_once(fake_server):
     assert [r["voice"] for r in Recorder.requests] == ["pf_dora", "bf_emma"]
 
 
+def test_an_empty_later_run_fails_instead_of_writing_a_partial_file(fake_server, tmp_path, monkeypatch):
+    real_post = KokoroTTSProvider._post
+    calls = []
+
+    def flaky(self, text, voice, speed, fmt, timeout, auto=False):
+        calls.append(text)
+        if len(calls) == 2:
+            import io
+
+            class Empty(io.BytesIO):
+                pass
+            return Empty(b"")
+        return real_post(self, text, voice, speed, fmt, timeout, auto)
+
+    monkeypatch.setattr(KokoroTTSProvider, "_post", flaky)
+    out = tmp_path / "a.wav"
+    with pytest.raises(KokoroServerError, match="part of the text"):
+        provider(fake_server, **BILINGUAL).synthesize(MIXED, str(out))
+    assert not out.exists() and not list(tmp_path.glob("*.part"))
+
+
+def test_closing_the_stream_before_reading_releases_the_first_response(fake_server, monkeypatch):
+    opened = []
+    real_post = KokoroTTSProvider._post
+
+    def tracking(self, *args, **kwargs):
+        resp = real_post(self, *args, **kwargs)
+        opened.append(resp)
+        return resp
+
+    monkeypatch.setattr(KokoroTTSProvider, "_post", tracking)
+    stream = provider(fake_server, **BILINGUAL).stream(MIXED, format="pcm")
+    stream.close()
+    assert len(opened) == 1 and opened[0].closed
+
+
+def test_closing_mid_stream_closes_the_active_response(fake_server, monkeypatch):
+    opened = []
+    real_post = KokoroTTSProvider._post
+
+    def tracking(self, *args, **kwargs):
+        resp = real_post(self, *args, **kwargs)
+        opened.append(resp)
+        return resp
+
+    monkeypatch.setattr(KokoroTTSProvider, "_post", tracking)
+    stream = provider(fake_server, **BILINGUAL).stream(MIXED, format="pcm")
+    next(stream)
+    stream.close()
+    assert all(r.closed for r in opened) and len(opened) == 1
+
+
+def test_warm_in_single_voice_mode_keeps_the_language_override(fake_server):
+    import time
+    provider(fake_server, voice="pf_dora", language="b").warm()
+    for _ in range(50):
+        if Recorder.requests:
+            break
+        time.sleep(0.05)
+    assert [(r["voice"], r["lang_code"]) for r in Recorder.requests] == [("pf_dora", "b")]
+
+
+def test_single_voice_mode_is_unchanged(fake_server, tmp_path):
+    provider(fake_server, voice="pf_dora", language="b").synthesize(MIXED, str(tmp_path / "a.wav"))
+    assert [(r["input"], r["voice"], r["lang_code"], r["response_format"]) for r in Recorder.requests] == [
+        (MIXED, "pf_dora", "b", "wav")]
+
+
 def test_bad_settings_fall_back_to_defaults(fake_server):
     p = provider(fake_server, voice="../x", speed="fast")
     assert p.default_voice() == "af_heart" and p._speed(None) == 1.0
