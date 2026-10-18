@@ -177,6 +177,166 @@ def test_provider_and_installer_agree_on_ports():
         assert KokoroTTSProvider(lookup).port == kokoro_cli.service_config(lookup).port
 
 
+BILINGUAL = {"voice": "pf_dora", "voices": {"pt": "pf_dora", "en": "bf_emma"}}
+MIXED = "Olá, Bruno. O deploy terminou. The pipeline is green and the tests passed."
+
+
+def test_synthesize_uses_one_voice_per_language_and_joins_the_audio(fake_server, tmp_path):
+    written = provider(fake_server, **BILINGUAL).synthesize(MIXED, str(tmp_path / "a.wav"))
+    sent = [(r["input"], r["voice"], r["lang_code"], r["response_format"]) for r in Recorder.requests]
+    assert sent == [("Olá, Bruno. O deploy terminou.", "pf_dora", "p", "pcm"),
+                    ("The pipeline is green and the tests passed.", "bf_emma", "b", "pcm")]
+    with wave.open(written) as w:
+        assert w.getframerate() == 24000 and w.getnframes() == 2 * 2400
+
+
+def test_stream_uses_one_request_per_language_run(fake_server):
+    chunks = list(provider(fake_server, **BILINGUAL).stream(MIXED, format="pcm"))
+    assert b"".join(chunks) == PCM * 2
+    assert [r["voice"] for r in Recorder.requests] == ["pf_dora", "bf_emma"]
+
+
+def test_single_language_text_is_one_request(fake_server, tmp_path):
+    provider(fake_server, **BILINGUAL).synthesize("The pipeline is green.", str(tmp_path / "a.wav"))
+    assert [(r["voice"], r["response_format"]) for r in Recorder.requests] == [("bf_emma", "wav")]
+
+
+def test_explicit_voice_turns_switching_off(fake_server, tmp_path):
+    provider(fake_server, **BILINGUAL).synthesize(MIXED, str(tmp_path / "a.wav"), voice="pm_alex")
+    assert [r["voice"] for r in Recorder.requests] == ["pm_alex"]
+
+
+def test_language_override_is_ignored_in_per_language_mode(fake_server, tmp_path):
+    provider(fake_server, language="e", **BILINGUAL).synthesize(MIXED, str(tmp_path / "a.wav"))
+    assert [r["lang_code"] for r in Recorder.requests] == ["p", "b"]
+
+
+def test_invalid_voice_map_entries_are_ignored(fake_server):
+    p = provider(fake_server, voice="pf_dora", voices={"en": "../x", "PT": "pf_dora", "klingon": "af_heart"})
+    assert p.language_voices() == {"pt": "pf_dora"}
+    assert provider(fake_server, voices="en=bf_emma").language_voices() == {}
+
+
+def test_warm_primes_each_configured_voice_once(fake_server):
+    p = provider(fake_server, **BILINGUAL)
+    p.warm()
+    import time
+    for _ in range(50):
+        if len(Recorder.requests) >= 2:
+            break
+        time.sleep(0.05)
+    assert [r["voice"] for r in Recorder.requests] == ["pf_dora", "bf_emma"]
+
+
+def test_an_empty_later_run_fails_instead_of_writing_a_partial_file(fake_server, tmp_path, monkeypatch):
+    real_post = KokoroTTSProvider._post
+    calls = []
+
+    def flaky(self, text, voice, speed, fmt, timeout, auto=False):
+        calls.append(text)
+        if len(calls) == 2:
+            import io
+
+            class Empty(io.BytesIO):
+                pass
+            return Empty(b"")
+        return real_post(self, text, voice, speed, fmt, timeout, auto)
+
+    monkeypatch.setattr(KokoroTTSProvider, "_post", flaky)
+    out = tmp_path / "a.wav"
+    with pytest.raises(KokoroServerError, match="part of the text"):
+        provider(fake_server, **BILINGUAL).synthesize(MIXED, str(out))
+    assert not out.exists() and not list(tmp_path.glob("*.part"))
+
+
+def test_closing_the_stream_before_reading_releases_the_first_response(fake_server, monkeypatch):
+    opened = []
+    real_post = KokoroTTSProvider._post
+
+    def tracking(self, *args, **kwargs):
+        resp = real_post(self, *args, **kwargs)
+        opened.append(resp)
+        return resp
+
+    monkeypatch.setattr(KokoroTTSProvider, "_post", tracking)
+    stream = provider(fake_server, **BILINGUAL).stream(MIXED, format="pcm")
+    stream.close()
+    assert len(opened) == 1 and opened[0].closed
+
+
+def test_closing_mid_stream_closes_the_active_response(fake_server, monkeypatch):
+    opened = []
+    real_post = KokoroTTSProvider._post
+
+    def tracking(self, *args, **kwargs):
+        resp = real_post(self, *args, **kwargs)
+        opened.append(resp)
+        return resp
+
+    monkeypatch.setattr(KokoroTTSProvider, "_post", tracking)
+    stream = provider(fake_server, **BILINGUAL).stream(MIXED, format="pcm")
+    next(stream)
+    stream.close()
+    assert all(r.closed for r in opened) and len(opened) == 1
+
+
+def test_warm_in_single_voice_mode_keeps_the_language_override(fake_server):
+    import time
+    provider(fake_server, voice="pf_dora", language="b").warm()
+    for _ in range(50):
+        if Recorder.requests:
+            break
+        time.sleep(0.05)
+    assert [(r["voice"], r["lang_code"]) for r in Recorder.requests] == [("pf_dora", "b")]
+
+
+def test_single_voice_mode_is_unchanged(fake_server, tmp_path):
+    provider(fake_server, voice="pf_dora", language="b").synthesize(MIXED, str(tmp_path / "a.wav"))
+    assert [(r["input"], r["voice"], r["lang_code"], r["response_format"]) for r in Recorder.requests] == [
+        (MIXED, "pf_dora", "b", "wav")]
+
+
+def test_english_words_go_with_non_english_runs_only(fake_server, tmp_path):
+    p = provider(fake_server, english_words=["pipeline", " card ", "", 7, "pipeline"], english_accent="uk",
+                 **BILINGUAL)
+    p.synthesize(MIXED, str(tmp_path / "a.wav"))
+    pt_req, en_req = Recorder.requests
+    assert pt_req["english_words"] == ["pipeline", "card"] and pt_req["english_accent"] == "b"
+    assert "english_words" not in en_req  # an English voice already says them in English
+
+
+def test_no_english_words_sends_nothing_extra(fake_server, tmp_path):
+    provider(fake_server, voice="pf_dora").synthesize("Oi.", str(tmp_path / "a.wav"))
+    assert "english_words" not in Recorder.requests[-1]
+
+
+def test_words_command_adds_removes_and_saves(tmp_path):
+    from argparse import Namespace
+    from kokoro_tts import kokoro_cli
+    store = {"english_words": ["pipeline"]}
+    handler = kokoro_cli.make_handler(lambda k, d=None: store.get(k, d), lambda: None,
+                                      save=lambda k, v: store.__setitem__(k, v))
+    assert handler(Namespace(kokoro_command="words", action="add", entries=["card", "Pipeline", "pull  request"])) == 0
+    assert store["english_words"] == ["pipeline", "card", "pull request"]
+    assert handler(Namespace(kokoro_command="words", action="remove", entries=["CARD"])) == 0
+    assert store["english_words"] == ["pipeline", "pull request"]
+    assert handler(Namespace(kokoro_command="words", action="add", entries=[])) == 2
+
+
+def test_words_command_rejects_what_synthesis_would_ignore():
+    from argparse import Namespace
+    from kokoro_tts import kokoro_cli, kokoro_loanwords
+    store = {}
+    store["english_words"] = [f"word{chr(97 + i % 26)}{chr(97 + i // 26 % 26)}" for i in range(kokoro_loanwords.MAX_ENTRIES - 1)]
+    handler = kokoro_cli.make_handler(lambda k, d=None: store.get(k, d), lambda: None,
+                                      save=lambda k, v: store.__setitem__(k, v))
+    code = handler(Namespace(kokoro_command="words", action="add",
+                             entries=["4.9", "one two three four five", "x" * 65, "fits", "toomany"]))
+    assert code == 1
+    assert store["english_words"][-1] == "fits" and len(store["english_words"]) == kokoro_loanwords.MAX_ENTRIES
+    assert "toomany" not in store["english_words"] and "4.9" not in store["english_words"]
+
+
 def test_bad_settings_fall_back_to_defaults(fake_server):
     p = provider(fake_server, voice="../x", speed="fast")
     assert p.default_voice() == "af_heart" and p._speed(None) == 1.0

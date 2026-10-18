@@ -39,7 +39,33 @@ The first letter of a voice id is its language (`a` US English, `b` UK English, 
 
 If `tts.voice` is set in your Hermes config, it wins over the plugin setting.
 
-Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for the configured voice, so run `hermes kokoro install` again after changing `voice`. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
+### A voice per language
+
+Kokoro reads text with the pronunciation rules of the voice's language, so English read by a Portuguese voice sounds wrong (and the other way round). Give each language its own voice and the plugin picks one per sentence:
+
+```sh
+hermes config set plugins.entries.kokoro-tts.settings.voice pf_dora          # default voice
+hermes config set plugins.entries.kokoro-tts.settings.voices.pt pf_dora
+hermes config set plugins.entries.kokoro-tts.settings.voices.en bf_emma
+hermes kokoro install                                                        # loads both voices at start-up
+```
+
+A reply in English is spoken by `bf_emma`, one in Portuguese by `pf_dora`, and a mixed reply switches at sentence boundaries. A sentence with no clear language (a name, a number) keeps the previous voice. Detection counts common function words and accents. It is built into the plugin, needs no extra package, and currently tells Portuguese from English. It works on whole sentences: an English word inside a Portuguese sentence ("o pipeline terminou") still gets the Portuguese pronunciation, because switching voices mid-sentence sounds worse than an accent. Setting `tts.voice` turns switching off.
+
+### English words inside other languages
+
+Switching voices fixes whole sentences, but a Portuguese sentence full of English terms ("o pipeline terminou e o card está no board") still gets those words pronounced as if they were Portuguese. Keep a dictionary of English words and the **same voice** says them in English, with no change of voice mid-sentence:
+
+```sh
+hermes kokoro words add pipeline card deploy merge board "pull request"
+hermes kokoro words                      # list
+hermes kokoro words remove board
+hermes config set plugins.entries.kokoro-tts.settings.english_accent b   # British; default a (American)
+```
+
+No list can know in advance which words you use, so it is meant to grow: when you hear a word come out wrong, add it. Changes apply to the next reply without a restart. Matching is case-insensitive, whole-word, and also covers plurals with -s ("cards", "pull requests"). How it works: the sentence is phonemized in the voice's own language, and only the listed words get English phonemes from Kokoro's English pronunciation lexicon. A word the lexicon does not know is pronounced by espeak's English rules instead (still English, though less polished: names like "Kubernetes" usually come out fine, invented words get spelled out). If the phonemes cannot be lined up with the words, the sentence is spoken normally. The dictionary applies to non-English voices; English voices already say these words in English.
+
+Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for `voice` and every voice in `voices`, so run `hermes kokoro install` again after changing either. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
 
 Languages tested by the author: Brazilian Portuguese and English. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
 
@@ -50,7 +76,10 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 | Key | Default | Meaning |
 |---|---|---|
 | `voice` | `af_heart` | Kokoro voice id |
-| `language` | empty | Read text in another language with the same voice (`p`, `pt-br`, `e`, …). Empty = the voice's language |
+| `voices` | empty | Voice per detected language, e.g. `{pt: pf_dora, en: bf_emma}` (see *A voice per language*) |
+| `english_words` | empty | Words and short phrases a non-English voice says in English (see *English words inside other languages*) |
+| `english_accent` | `a` | Pronunciation of `english_words`: `a` American, `b` British |
+| `language` | empty | Single-voice mode: read text in another language with the same voice (`p`, `pt-br`, `e`, …). Empty = the voice's language |
 | `speed` | `1.0` | 0.25 to 4.0 |
 | `port` | `8770` | Loopback port of the server |
 | `service_dir` | `~/Library/Application Support/hermes-kokoro-tts` | Server environment, model cache and log |
@@ -64,13 +93,14 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 | `hermes kokoro restart` | Restart the server |
 | `hermes kokoro voices` | List installed voices |
 | `hermes kokoro say "text" [--voice id]` | Synthesize a test sentence to a WAV file |
+| `hermes kokoro words [list\|add\|remove] [WORD ...]` | Manage the English-words dictionary |
 | `hermes kokoro uninstall [--purge]` | Stop and remove the launchd agent; `--purge` also deletes the environment and the model |
 
 ## What it reads, sends and writes
 
 - **Sends** the text Hermes wants spoken to `http://127.0.0.1:<port>`, on your own machine, bypassing any `http_proxy` setting. Nothing goes to a cloud service. The server does not log the text.
 - **Downloads**, during `hermes kokoro install` only: Python packages through `uv` (PyPI, plus spaCy's `en_core_web_sm` 3.8.0 wheel from its GitHub release, pinned by SHA-256) and the model `mlx-community/Kokoro-82M-bf16` at revision `a71e4d38` from Hugging Face. The server then runs with `HF_HUB_OFFLINE=1`.
-- **Writes** the server environment, model cache and log to `service_dir`, a launchd agent to `~/Library/LaunchAgents/dev.hermes.kokoro-tts.plist`, and the audio files Hermes asks for (WAV, 24 kHz mono).
+- **Writes** your Hermes `config.yaml` only when you run `hermes kokoro words add|remove` (the `english_words` setting); the server environment, model cache and log to `service_dir`; a launchd agent to `~/Library/LaunchAgents/dev.hermes.kokoro-tts.plist`, and the audio files Hermes asks for (WAV, 24 kHz mono).
 - **Listens** only on loopback. The server refuses to bind any other address because it has no authentication.
 
 ## How it works

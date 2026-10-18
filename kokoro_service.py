@@ -21,7 +21,8 @@ from typing import Callable, Optional
 from xml.sax.saxutils import escape
 
 PLUGIN_ROOT = Path(__file__).resolve().parent
-SERVER_SOURCES = (PLUGIN_ROOT / "server" / "kokoro_server.py", PLUGIN_ROOT / "kokoro_voices.py")
+SERVER_SOURCES = (PLUGIN_ROOT / "server" / "kokoro_server.py", PLUGIN_ROOT / "kokoro_voices.py",
+                  PLUGIN_ROOT / "kokoro_language.py", PLUGIN_ROOT / "kokoro_loanwords.py")
 REQUIREMENTS = PLUGIN_ROOT / "server" / "requirements.lock"
 
 # Reviewed model pin: changing it is a code change, not a setting.
@@ -55,6 +56,7 @@ class ServiceConfig:
     service_dir: Path = DEFAULT_SERVICE_DIR
     label: str = DEFAULT_LABEL
     default_voice: str = "af_heart"
+    prime_voices: tuple[str, ...] = ()
 
     @property
     def base_url(self) -> str:
@@ -94,6 +96,8 @@ def render_plist(cfg: ServiceConfig) -> str:
     args = [str(cfg.python), str(cfg.service_dir / "server" / "kokoro_server.py"),
             "--host", "127.0.0.1", "--port", str(cfg.port),
             "--model", MODEL_REPO, "--revision", MODEL_REVISION, "--default-voice", cfg.default_voice]
+    for voice in cfg.prime_voices:
+        args += ["--prime", voice]
     arg_xml = "\n".join(f"\t\t<string>{escape(a)}</string>" for a in args)
     env = {"HF_HOME": str(cfg.hf_home), "HF_HUB_OFFLINE": "1", "PYTHONNOUSERSITE": "1",
            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"}
