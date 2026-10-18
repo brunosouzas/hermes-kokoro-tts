@@ -1,0 +1,253 @@
+"""Local Kokoro text-to-speech server (Apple Silicon, MLX).
+
+Runs in its own virtual environment, managed by ``hermes kokoro install``. It loads
+one pinned Kokoro model once and serves an OpenAI-compatible speech endpoint on the
+loopback interface:
+
+    POST /v1/audio/speech   {"input", "voice", "speed", "response_format": "wav"|"pcm", "lang_code"}
+    GET  /v1/voices         voice ids available in the pinned model snapshot
+    GET  /health            {"ok", "model", "revision", "loaded", "sample_rate"}
+
+Voices are resolved from the pinned snapshot on disk and passed to mlx-audio as a
+file path, so the server never touches the network after installation.
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import json
+import logging
+import os
+import sys
+import threading
+import wave
+from http import HTTPStatus
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+from typing import Any, Callable, Optional
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import kokoro_voices  # noqa: E402  (copied next to this file by the installer)
+
+SAMPLE_RATE = 24000
+MAX_INPUT_CHARS = 10000
+MAX_BODY_BYTES = 64 * 1024
+LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+
+log = logging.getLogger("kokoro_server")
+
+
+class Engine:
+    """Owns the loaded model. ``synthesize`` is serialized: MLX inference is not re-entrant."""
+
+    def __init__(self, repo: str, revision: str, loader: Optional[Callable[[], Any]] = None,
+                 snapshot: Optional[Path] = None):
+        self.repo, self.revision = repo, revision
+        self._loader = loader
+        self._snapshot = snapshot
+        self._model: Any = None
+        self._lock = threading.Lock()
+        self.error: Optional[str] = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
+
+    def snapshot(self) -> Path:
+        if self._snapshot is None:
+            self._snapshot = download(self.repo, self.revision, local_files_only=True)
+        return self._snapshot
+
+    def load(self) -> None:
+        try:
+            if self._loader is not None:
+                self._model = self._loader()
+            else:
+                import mlx.core as mx
+                from mlx_audio.tts.utils import load_model
+                self.snapshot()  # fail early if the pinned snapshot is missing
+                model = load_model(self.repo, revision=self.revision)
+                mx.eval(model.parameters())
+                self._model = model
+            log.info("model ready: %s@%s", self.repo, self.revision[:8])
+        except Exception as exc:  # reported through /health; requests return 503
+            self.error = f"{type(exc).__name__}: {exc}"
+            log.exception("model failed to load")
+
+    def voices(self) -> list[str]:
+        folder = self.snapshot() / "voices"
+        return sorted(p.stem for p in folder.glob("*.safetensors") if kokoro_voices.is_valid_voice_id(p.stem))
+
+    def voice_path(self, voice: str) -> Path:
+        if not kokoro_voices.is_valid_voice_id(voice):
+            raise ValueError(f"invalid voice id {voice!r}")
+        path = self.snapshot() / "voices" / f"{voice}.safetensors"
+        if not path.is_file():
+            raise LookupError(f"voice {voice!r} is not in the installed model")
+        return path
+
+    def synthesize(self, text: str, voice: str, lang_code: str, speed: float) -> bytes:
+        """Return mono int16 little-endian PCM at SAMPLE_RATE."""
+        if self._model is None:
+            raise RuntimeError(self.error or "model is still loading")
+        voice_file = str(self.voice_path(voice))
+        with self._lock:
+            return self._generate(text, voice_file, lang_code, speed)
+
+    def _generate(self, text: str, voice_file: str, lang_code: str, speed: float) -> bytes:
+        import numpy as np
+        pieces = []
+        for result in self._model.generate(text=text, voice=voice_file, lang_code=lang_code, speed=speed):
+            pieces.append(np.asarray(result.audio, dtype=np.float32).reshape(-1))
+        if not pieces:
+            return b""
+        audio = np.clip(np.concatenate(pieces), -1.0, 1.0)
+        return (audio * 32767.0).astype("<i2").tobytes()
+
+
+def download(repo: str, revision: str, local_files_only: bool = False) -> Path:
+    """Fetch (or, offline, locate) the pinned snapshot.
+
+    Uses the same file patterns as mlx-audio's own loader: huggingface_hub checks an offline
+    snapshot for completeness against the patterns it is given, so the install-time download
+    and every later offline lookup must agree on them.
+    """
+    from huggingface_hub import snapshot_download
+    from mlx_audio.utils import DEFAULT_ALLOW_PATTERNS
+    return Path(snapshot_download(repo, revision=revision, allow_patterns=DEFAULT_ALLOW_PATTERNS,
+                                  local_files_only=local_files_only))
+
+
+def pcm_to_wav(pcm: bytes, rate: int = SAMPLE_RATE) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(rate)
+        out.writeframes(pcm)
+    return buf.getvalue()
+
+
+def make_handler(engine: Engine, default_voice: str) -> type[BaseHTTPRequestHandler]:
+    class Handler(BaseHTTPRequestHandler):
+        server_version = "hermes-kokoro-tts"
+
+        def log_message(self, fmt: str, *args: Any) -> None:  # request text is never logged
+            log.info("%s %s", self.command, self.path.split("?", 1)[0])
+
+        def _json(self, status: int, payload: dict) -> None:
+            body = json.dumps(payload).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def _error(self, status: int, message: str) -> None:
+            self._json(status, {"error": {"message": message}})
+
+        def do_GET(self) -> None:
+            path = self.path.split("?", 1)[0]
+            if path == "/health":
+                self._json(HTTPStatus.OK, {"ok": engine.loaded, "loaded": engine.loaded, "error": engine.error,
+                                           "model": engine.repo, "revision": engine.revision,
+                                           "sample_rate": SAMPLE_RATE})
+            elif path == "/v1/voices":
+                try:
+                    self._json(HTTPStatus.OK, {"voices": engine.voices()})
+                except Exception as exc:
+                    self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            else:
+                self._error(HTTPStatus.NOT_FOUND, "not found")
+
+        def do_POST(self) -> None:
+            if self.path.split("?", 1)[0] != "/v1/audio/speech":
+                return self._error(HTTPStatus.NOT_FOUND, "not found")
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                return self._error(HTTPStatus.BAD_REQUEST, "bad Content-Length")
+            if length <= 0 or length > MAX_BODY_BYTES:
+                return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "body missing or too large")
+            try:
+                req = json.loads(self.rfile.read(length))
+                if not isinstance(req, dict):
+                    raise ValueError("expected a JSON object")
+            except ValueError as exc:
+                return self._error(HTTPStatus.BAD_REQUEST, f"invalid JSON: {exc}")
+
+            text = req.get("input")
+            if not isinstance(text, str) or not text.strip():
+                return self._error(HTTPStatus.BAD_REQUEST, "'input' must be non-empty text")
+            if len(text) > MAX_INPUT_CHARS:
+                return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"'input' exceeds {MAX_INPUT_CHARS} characters")
+            voice = req.get("voice") or default_voice
+            fmt = (req.get("response_format") or "wav").lower()
+            if fmt not in ("wav", "pcm"):
+                return self._error(HTTPStatus.BAD_REQUEST, "response_format must be 'wav' or 'pcm'")
+            try:
+                speed = float(req.get("speed") or 1.0)
+                if not 0.25 <= speed <= 4.0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                return self._error(HTTPStatus.BAD_REQUEST, "'speed' must be between 0.25 and 4.0")
+            try:
+                lang = kokoro_voices.lang_code_for(voice, req.get("lang_code"))
+                pcm = engine.synthesize(text, voice, lang, speed)
+            except ValueError as exc:
+                return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            except LookupError as exc:
+                return self._error(HTTPStatus.NOT_FOUND, str(exc))
+            except RuntimeError as exc:
+                return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            except Exception as exc:
+                log.exception("synthesis failed")
+                return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"synthesis failed: {type(exc).__name__}")
+
+            body = pcm if fmt == "pcm" else pcm_to_wav(pcm)
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "audio/pcm; rate=24000" if fmt == "pcm" else "audio/wav")
+            self.send_header("X-Audio-Sample-Rate", str(SAMPLE_RATE))
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    return Handler
+
+
+def serve(engine: Engine, host: str, port: int, default_voice: str) -> ThreadingHTTPServer:
+    if host not in LOOPBACK:
+        raise SystemExit(f"refusing to listen on {host!r}: this server has no authentication, use a loopback address")
+    httpd = ThreadingHTTPServer((host, port), make_handler(engine, default_voice))
+    httpd.daemon_threads = True
+    return httpd
+
+
+def main(argv: Optional[list[str]] = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8770)
+    parser.add_argument("--model", required=True)
+    parser.add_argument("--revision", required=True)
+    parser.add_argument("--default-voice", default=kokoro_voices.DEFAULT_VOICE)
+    parser.add_argument("--download", action="store_true", help="download the pinned model and exit (installer)")
+    args = parser.parse_args(argv)
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.download:
+        print(download(args.model, args.revision))
+        return
+    os.environ.setdefault("HF_HUB_OFFLINE", "1")
+
+    engine = Engine(args.model, args.revision)
+    httpd = serve(engine, args.host, args.port, args.default_voice)
+    threading.Thread(target=engine.load, name="kokoro-load", daemon=True).start()
+    log.info("listening on http://%s:%d", args.host, args.port)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,8 @@
+# Direct dependencies of the Kokoro server (Python 3.11, MLX, Apple Silicon only).
+# requirements.lock holds the exact, tested versions (frozen with `pip freeze --all --exclude pip`;
+# torch needs setuptools>=77, so setuptools stays in the lock). misaki[en] brings the English G2P;
+# the other Kokoro languages use espeak-ng through espeakng-loader.
+mlx-audio
+soundfile
+psutil
+misaki[en]
