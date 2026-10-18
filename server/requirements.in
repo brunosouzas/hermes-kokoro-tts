@@ -1,0 +1,11 @@
+# Direct dependencies of the Kokoro server (Python 3.11, MLX, Apple Silicon only).
+# requirements.lock holds the exact, tested versions (frozen with `pip freeze --all --exclude pip`;
+# torch needs setuptools>=77, so setuptools stays in the lock). misaki[en] brings the English G2P;
+# the other Kokoro languages use espeak-ng through espeakng-loader.
+mlx-audio
+soundfile
+psutil
+misaki[en]
+# misaki's English G2P downloads this spaCy model on first use unless it is installed; pinning it
+# keeps English synthesis offline. Version must match spaCy's minor (3.8.x).
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85

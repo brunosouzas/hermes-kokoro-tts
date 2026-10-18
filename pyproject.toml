@@ -1,0 +1,18 @@
+[project]
+name = "hermes-kokoro-tts"
+version = "0.1.0"
+description = "Hermes Agent plugin: local Kokoro text-to-speech on Apple Silicon (MLX)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+# Nothing is installed into Hermes: the plugin uses the standard library only, and the Kokoro
+# server runs in its own environment (server/requirements.lock), built by `hermes kokoro install`.
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "numpy>=1.26,<3"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# importlib mode: the repository root is the plugin package and must not be collected as one.
+addopts = "-p no:cacheprovider --import-mode=importlib"
