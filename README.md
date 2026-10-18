@@ -2,7 +2,7 @@
 
 Local [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech for [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) on Apple Silicon. Hermes speaks with a natural voice in nine languages, sentence by sentence as the reply streams, and the text never leaves your Mac.
 
-- **Native Hermes TTS provider**: set `tts.provider: kokoro` and every surface that speaks (Desktop read-aloud, voice mode, wake word, `text_to_speech`) uses it.
+- **Native Hermes TTS provider**: set `tts.provider: kokoro-mlx` and every surface that speaks (Desktop read-aloud, voice mode, wake word, `text_to_speech`) uses it.
 - **Streaming**: raw PCM per sentence, so the first words play while the rest of the reply is still being written.
 - **Any Kokoro voice**: 54 voices in American and British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin.
 - **Isolated and offline**: the model runs in its own Python environment behind a loopback-only server. Hermes' own environment gets nothing new, and after installation nothing touches the network.
@@ -20,11 +20,13 @@ Local [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech for [He
 ```sh
 hermes plugins install brunosouzas/hermes-kokoro-tts
 hermes kokoro install                 # builds the server environment, downloads the model, starts it
-hermes config set tts.provider kokoro
+hermes config set tts.provider kokoro-mlx
 hermes kokoro say "Hello from Hermes"  # writes a test WAV and prints its path
 ```
 
 `hermes kokoro install` is idempotent: run it again after an update or after changing the port.
+
+**Upgrading from 0.1.0:** the provider is now called `kokoro-mlx` (it was `kokoro`). Hermes reserves the names of its built-in providers, and a built-in `kokoro` has been proposed upstream, so the plugin uses a name that cannot collide. Run `hermes config set tts.provider kokoro-mlx` once.
 
 ## Choose a voice
 
@@ -75,7 +77,7 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 
 ```mermaid
 flowchart LR
-  H["Hermes<br/>tts.provider: kokoro"] -- "HTTP on 127.0.0.1<br/>text, voice, speed" --> S["Kokoro server<br/>own venv, launchd"]
+  H["Hermes<br/>tts.provider: kokoro-mlx"] -- "HTTP on 127.0.0.1<br/>text, voice, speed" --> S["Kokoro server<br/>own venv, launchd"]
   S -- "WAV or raw PCM" --> H
   S --> M["Kokoro-82M on MLX<br/>pinned revision, offline"]
 ```

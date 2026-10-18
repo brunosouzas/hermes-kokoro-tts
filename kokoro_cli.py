@@ -44,7 +44,7 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any]) -> Calla
                 if raw_port not in (None, "") and str(raw_port) != str(cfg.port):
                     print(f"warning: port setting {raw_port!r} is not a usable TCP port; using {cfg.port}")
                 service.install(cfg)
-                print("Next: hermes config set tts.provider kokoro")
+                print("Next: hermes config set tts.provider kokoro-mlx")
             elif cmd == "status":
                 print(json.dumps(service.status(cfg), indent=2))
             elif cmd == "restart":
