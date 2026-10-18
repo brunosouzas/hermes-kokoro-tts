@@ -137,7 +137,7 @@ def install(cfg: ServiceConfig, run: Runner = subprocess.run, say: Callable[[str
     for src in SERVER_SOURCES:
         shutil.copy2(src, server_dir / src.name)
 
-    say("Preparing the Python environment (first run downloads ~1 GB of packages)...")
+    say("Preparing the Python environment (the first run downloads ~1.1 GB of packages)...")
     if not cfg.python.is_file():
         run([uv, "venv", "--python", PYTHON_VERSION, str(cfg.service_dir / ".venv")], check=True, env=env)
     run([uv, "pip", "sync", "--python", str(cfg.python), str(REQUIREMENTS)], check=True, env=env)

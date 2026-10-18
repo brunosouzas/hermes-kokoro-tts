@@ -13,7 +13,7 @@ Local [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech for [He
 - macOS on Apple Silicon (MLX runs only there).
 - Hermes Agent 0.21.5 or later.
 - [`uv`](https://docs.astral.sh/uv/) (`brew install uv`). It also fetches Python 3.11 if you don't have it.
-- About 2 GB of disk: ~1.5 GB of Python packages and ~340 MB of model.
+- About 1.5 GB of disk: ~1.1 GB of Python packages and ~340 MB of model.
 
 ## Install
 
