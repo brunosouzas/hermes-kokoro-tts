@@ -14,12 +14,8 @@ Setting = Callable[[str, Any], Any]
 
 def service_config(setting: Setting) -> service.ServiceConfig:
     raw_dir = setting("service_dir", "") or ""
-    try:
-        port = int(setting("port", service.DEFAULT_PORT))
-    except (TypeError, ValueError):
-        port = service.DEFAULT_PORT
     return service.ServiceConfig(
-        port=port,
+        port=service.parse_port(setting("port", None)),
         service_dir=Path(raw_dir).expanduser() if raw_dir else service.DEFAULT_SERVICE_DIR,
         default_voice=setting("voice", "af_heart") or "af_heart",
     )
@@ -44,6 +40,9 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any]) -> Calla
         cmd = getattr(args, "kokoro_command", None)
         try:
             if cmd == "install":
+                raw_port = setting("port", None)
+                if raw_port not in (None, "") and str(raw_port) != str(cfg.port):
+                    print(f"warning: port setting {raw_port!r} is not a usable TCP port; using {cfg.port}")
                 service.install(cfg)
                 print("Next: hermes config set tts.provider kokoro")
             elif cmd == "status":

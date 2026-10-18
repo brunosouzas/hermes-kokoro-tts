@@ -35,6 +35,19 @@ DEFAULT_SERVICE_DIR = Path.home() / "Library" / "Application Support" / "hermes-
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
+# Loopback requests must never follow http_proxy/HTTPS_PROXY: the text being spoken would leave the machine.
+LOOPBACK_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def parse_port(value: object) -> int:
+    """The configured port, or DEFAULT_PORT when it is missing or not a usable TCP port.
+    Shared by the provider and the installer so both always agree."""
+    try:
+        port = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return DEFAULT_PORT
+    return port if 1 <= port <= 65535 else DEFAULT_PORT
+
 
 @dataclass
 class ServiceConfig:
@@ -175,7 +188,7 @@ def uninstall(cfg: ServiceConfig, purge: bool = False, run: Runner = subprocess.
 
 def health(cfg: ServiceConfig, timeout: float = 2.0) -> Optional[dict]:
     try:
-        with urllib.request.urlopen(f"{cfg.base_url}/health", timeout=timeout) as resp:
+        with LOOPBACK_OPENER.open(f"{cfg.base_url}/health", timeout=timeout) as resp:
             return json.load(resp)
     except (urllib.error.URLError, OSError, ValueError):
         return None

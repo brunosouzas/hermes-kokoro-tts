@@ -14,7 +14,7 @@ from typing import Any, Callable, Iterator, Optional
 from agent.tts_provider import TTSProvider
 
 from . import kokoro_voices as voices
-from .kokoro_service import DEFAULT_LABEL
+from .kokoro_service import DEFAULT_LABEL, LOOPBACK_OPENER, parse_port
 
 SAMPLE_RATE = 24000
 CONNECT_TIMEOUT = 0.25
@@ -49,11 +49,7 @@ class KokoroTTSProvider(TTSProvider):
     # ---- settings ---------------------------------------------------------------------------
     @property
     def port(self) -> int:
-        try:
-            port = int(self._setting("port", 8770))
-        except (TypeError, ValueError):
-            return 8770
-        return port if 1 <= port <= 65535 else 8770
+        return parse_port(self._setting("port", None))
 
     @property
     def base_url(self) -> str:
@@ -102,7 +98,7 @@ class KokoroTTSProvider(TTSProvider):
 
     def list_voices(self) -> list[dict[str, Any]]:
         try:
-            with urllib.request.urlopen(f"{self.base_url}/v1/voices", timeout=2.0) as resp:
+            with LOOPBACK_OPENER.open(f"{self.base_url}/v1/voices", timeout=2.0) as resp:
                 ids = json.load(resp).get("voices", [])
         except (urllib.error.URLError, OSError, ValueError):
             return []
@@ -122,7 +118,7 @@ class KokoroTTSProvider(TTSProvider):
         req = urllib.request.Request(f"{self.base_url}/v1/audio/speech", data=json.dumps(payload).encode(),
                                      headers={"Content-Type": "application/json"}, method="POST")
         try:
-            return urllib.request.urlopen(req, timeout=timeout)
+            return LOOPBACK_OPENER.open(req, timeout=timeout)
         except urllib.error.HTTPError as exc:
             try:
                 message = json.load(exc).get("error", {}).get("message", "")

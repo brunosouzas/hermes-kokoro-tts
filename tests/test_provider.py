@@ -140,6 +140,26 @@ def test_list_voices_filters_and_describes(fake_server):
     assert [v["id"] for v in provider(fake_server).list_voices()] == ["af_heart", "pf_dora"]
 
 
+def test_proxy_environment_is_ignored_for_loopback(fake_server, tmp_path, monkeypatch):
+    # A proxy that would receive the text if urllib's environment proxies were honoured.
+    for var in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY"):
+        monkeypatch.setenv(var, "http://proxy.invalid:3128")
+    for var in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(var, raising=False)
+    p = provider(fake_server)
+    p.synthesize("private words", str(tmp_path / "a.wav"))
+    assert Recorder.requests[-1]["input"] == "private words"
+    assert [v["id"] for v in p.list_voices()] == ["af_heart", "pf_dora"]
+
+
+def test_provider_and_installer_agree_on_ports():
+    from kokoro_tts import kokoro_cli
+    for value in (0, 70000, "x", None, 8771, "8772"):
+        settings = {"port": value}
+        lookup = lambda k, d=None: settings.get(k, d)  # noqa: E731
+        assert KokoroTTSProvider(lookup).port == kokoro_cli.service_config(lookup).port
+
+
 def test_bad_settings_fall_back_to_defaults(fake_server):
     p = provider(fake_server, voice="../x", speed="fast")
     assert p.default_voice() == "af_heart" and p._speed(None) == 1.0

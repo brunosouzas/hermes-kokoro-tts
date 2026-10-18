@@ -66,8 +66,8 @@ All under `plugins.entries.kokoro-tts.settings` (also editable in Hermes Desktop
 
 ## What it reads, sends and writes
 
-- **Sends** the text Hermes wants spoken to `http://127.0.0.1:<port>`, on your own machine. Nothing goes to a cloud service. The server does not log the text.
-- **Downloads**, during `hermes kokoro install` only: Python packages through `uv` (PyPI) and the model `mlx-community/Kokoro-82M-bf16` at revision `a71e4d38` from Hugging Face. The server then runs with `HF_HUB_OFFLINE=1`.
+- **Sends** the text Hermes wants spoken to `http://127.0.0.1:<port>`, on your own machine, bypassing any `http_proxy` setting. Nothing goes to a cloud service. The server does not log the text.
+- **Downloads**, during `hermes kokoro install` only: Python packages through `uv` (PyPI, plus spaCy's `en_core_web_sm` 3.8.0 wheel from its GitHub release, pinned by SHA-256) and the model `mlx-community/Kokoro-82M-bf16` at revision `a71e4d38` from Hugging Face. The server then runs with `HF_HUB_OFFLINE=1`.
 - **Writes** the server environment, model cache and log to `service_dir`, a launchd agent to `~/Library/LaunchAgents/dev.hermes.kokoro-tts.plist`, and the audio files Hermes asks for (WAV, 24 kHz mono).
 - **Listens** only on loopback. The server refuses to bind any other address because it has no authentication.
 
