@@ -14,6 +14,7 @@ from typing import Any, Callable, Iterator, Optional
 from agent.tts_provider import TTSProvider
 
 from . import kokoro_voices as voices
+from .kokoro_service import DEFAULT_LABEL
 
 SAMPLE_RATE = 24000
 CONNECT_TIMEOUT = 0.25
@@ -49,9 +50,10 @@ class KokoroTTSProvider(TTSProvider):
     @property
     def port(self) -> int:
         try:
-            return int(self._setting("port", 8770))
+            port = int(self._setting("port", 8770))
         except (TypeError, ValueError):
             return 8770
+        return port if 1 <= port <= 65535 else 8770
 
     @property
     def base_url(self) -> str:
@@ -81,7 +83,17 @@ class KokoroTTSProvider(TTSProvider):
 
     # ---- availability -------------------------------------------------------------------------
     def is_available(self) -> bool:
-        """Cheap loopback probe: the server port accepts a connection."""
+        """The server is installed (its launchd agent exists). Pickers call this on every paint, so
+        the contract forbids network calls; a stopped server surfaces as a clear synthesize() error."""
+        try:
+            return self._plist_path().is_file()
+        except OSError:
+            return False
+
+    def _plist_path(self) -> Path:
+        return Path.home() / "Library" / "LaunchAgents" / f"{DEFAULT_LABEL}.plist"
+
+    def _server_reachable(self) -> bool:
         try:
             with socket.create_connection(("127.0.0.1", self.port), timeout=CONNECT_TIMEOUT):
                 return True
@@ -163,5 +175,5 @@ class KokoroTTSProvider(TTSProvider):
                     resp.read()
             except Exception:
                 pass
-        if self.is_available():
+        if self._server_reachable():
             threading.Thread(target=_prime, name="kokoro-warm", daemon=True).start()

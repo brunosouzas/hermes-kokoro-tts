@@ -38,6 +38,14 @@ LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 log = logging.getLogger("kokoro_server")
 
 
+class NotReady(Exception):
+    """The model has not loaded (yet, or at all)."""
+
+
+class VoiceNotFound(Exception):
+    """The requested voice is not in the installed snapshot."""
+
+
 class Engine:
     """Owns the loaded model. ``synthesize`` is serialized: MLX inference is not re-entrant."""
 
@@ -84,13 +92,13 @@ class Engine:
             raise ValueError(f"invalid voice id {voice!r}")
         path = self.snapshot() / "voices" / f"{voice}.safetensors"
         if not path.is_file():
-            raise LookupError(f"voice {voice!r} is not in the installed model")
+            raise VoiceNotFound(f"voice {voice!r} is not in the installed model")
         return path
 
     def synthesize(self, text: str, voice: str, lang_code: str, speed: float) -> bytes:
         """Return mono int16 little-endian PCM at SAMPLE_RATE."""
         if self._model is None:
-            raise RuntimeError(self.error or "model is still loading")
+            raise NotReady(self.error or "model is still loading")
         voice_file = str(self.voice_path(voice))
         with self._lock:
             return self._generate(text, voice_file, lang_code, speed)
@@ -117,6 +125,18 @@ def download(repo: str, revision: str, local_files_only: bool = False) -> Path:
     from mlx_audio.utils import DEFAULT_ALLOW_PATTERNS
     return Path(snapshot_download(repo, revision=revision, allow_patterns=DEFAULT_ALLOW_PATTERNS,
                                   local_files_only=local_files_only))
+
+
+# Packages that would otherwise be fetched from the network the first time a language is used.
+OFFLINE_PACKAGES = ("en_core_web_sm",)
+
+
+def check_offline_packages() -> None:
+    """Fail installation if a runtime download would be needed (misaki calls spacy.cli.download)."""
+    import importlib.util
+    missing = [name for name in OFFLINE_PACKAGES if importlib.util.find_spec(name) is None]
+    if missing:
+        raise SystemExit(f"missing offline packages: {', '.join(missing)}; re-run `hermes kokoro install`")
 
 
 def pcm_to_wav(pcm: bytes, rate: int = SAMPLE_RATE) -> bytes:
@@ -183,26 +203,41 @@ def make_handler(engine: Engine, default_voice: str) -> type[BaseHTTPRequestHand
             if len(text) > MAX_INPUT_CHARS:
                 return self._error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, f"'input' exceeds {MAX_INPUT_CHARS} characters")
             voice = req.get("voice") or default_voice
-            fmt = (req.get("response_format") or "wav").lower()
-            if fmt not in ("wav", "pcm"):
+            fmt = req.get("response_format") or "wav"
+            lang_override = req.get("lang_code")
+            if not isinstance(voice, str):
+                return self._error(HTTPStatus.BAD_REQUEST, "'voice' must be a string")
+            if not isinstance(fmt, str) or fmt.lower() not in ("wav", "pcm"):
                 return self._error(HTTPStatus.BAD_REQUEST, "response_format must be 'wav' or 'pcm'")
+            fmt = fmt.lower()
+            if lang_override is not None and not isinstance(lang_override, str):
+                return self._error(HTTPStatus.BAD_REQUEST, "'lang_code' must be a string")
             try:
                 speed = float(req.get("speed") or 1.0)
                 if not 0.25 <= speed <= 4.0:
                     raise ValueError
             except (TypeError, ValueError):
                 return self._error(HTTPStatus.BAD_REQUEST, "'speed' must be between 0.25 and 4.0")
+            # Validate the request first: these messages are ours and never contain the text.
             try:
-                lang = kokoro_voices.lang_code_for(voice, req.get("lang_code"))
-                pcm = engine.synthesize(text, voice, lang, speed)
+                lang = kokoro_voices.lang_code_for(voice, lang_override)
+                engine.voice_path(voice)
             except ValueError as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
-            except LookupError as exc:
+            except VoiceNotFound as exc:
                 return self._error(HTTPStatus.NOT_FOUND, str(exc))
-            except RuntimeError as exc:
+            except NotReady as exc:
                 return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
             except Exception as exc:
-                log.exception("synthesis failed")
+                log.error("voice lookup failed: %s", type(exc).__name__)
+                return self._error(HTTPStatus.SERVICE_UNAVAILABLE, f"voice lookup failed: {type(exc).__name__}")
+            try:
+                pcm = engine.synthesize(text, voice, lang, speed)
+            except NotReady as exc:
+                return self._error(HTTPStatus.SERVICE_UNAVAILABLE, str(exc))
+            except Exception as exc:
+                # Exception messages and tracebacks can quote the input; log the type only.
+                log.error("synthesis failed: %s", type(exc).__name__)
                 return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"synthesis failed: {type(exc).__name__}")
 
             body = pcm if fmt == "pcm" else pcm_to_wav(pcm)
@@ -235,13 +270,26 @@ def main(argv: Optional[list[str]] = None) -> None:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.download:
+        check_offline_packages()
         print(download(args.model, args.revision))
         return
     os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
     engine = Engine(args.model, args.revision)
     httpd = serve(engine, args.host, args.port, args.default_voice)
-    threading.Thread(target=engine.load, name="kokoro-load", daemon=True).start()
+
+    def load_and_prime() -> None:
+        engine.load()
+        # The language pipeline (G2P, and for English spaCy and torch) loads on first use and can
+        # take tens of seconds; pay that at start-up for the default voice, not on the first reply.
+        if engine.loaded and kokoro_voices.is_valid_voice_id(args.default_voice):
+            try:
+                engine.synthesize(".", args.default_voice, kokoro_voices.lang_code_for(args.default_voice), 1.0)
+                log.info("pipeline primed for %s", args.default_voice)
+            except Exception as exc:
+                log.warning("priming failed: %s", type(exc).__name__)
+
+    threading.Thread(target=load_and_prime, name="kokoro-load", daemon=True).start()
     log.info("listening on http://%s:%d", args.host, args.port)
     try:
         httpd.serve_forever()

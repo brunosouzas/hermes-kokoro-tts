@@ -37,6 +37,8 @@ The first letter of a voice id is its language (`a` US English, `b` UK English, 
 
 If `tts.voice` is set in your Hermes config, it wins over the plugin setting.
 
+Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for the configured voice, so run `hermes kokoro install` again after changing `voice`. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
+
 Languages tested by the author: Brazilian Portuguese and English. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
 
 ## Settings

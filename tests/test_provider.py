@@ -63,11 +63,27 @@ def provider(port, **settings):
 def test_identity_and_streaming_contract(fake_server):
     p = provider(fake_server)
     assert p.name == "kokoro" and p.streams_pcm is True and p.stream_sample_rate == 24000
-    assert p.is_available()
 
 
-def test_unavailable_when_nothing_listens():
-    assert provider(9).is_available() is False  # port 9 (discard) is not served on macOS by default
+def test_is_available_means_installed_and_never_touches_the_network(tmp_path, monkeypatch):
+    import socket
+    monkeypatch.setattr("kokoro_tts.kokoro_provider.Path.home", classmethod(lambda cls: tmp_path))
+
+    def no_network(*args, **kwargs):
+        raise AssertionError("is_available() must not open a socket")
+    monkeypatch.setattr(socket, "create_connection", no_network)
+
+    p = provider(8770)
+    assert p.is_available() is False
+    agents = tmp_path / "Library" / "LaunchAgents"
+    agents.mkdir(parents=True)
+    (agents / "dev.hermes.kokoro-tts.plist").write_text("<plist/>")
+    assert p.is_available() is True
+
+
+@pytest.mark.parametrize("value", [0, 70000, -1, "x", None])
+def test_out_of_range_port_falls_back_without_raising(value):
+    assert provider(value).port == 8770
 
 
 def test_synthesize_writes_wav_and_fixes_extension(fake_server, tmp_path):

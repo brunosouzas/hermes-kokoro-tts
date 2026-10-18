@@ -110,6 +110,71 @@ def test_bad_requests(server, payload, status):
     assert model.calls == []
 
 
+@pytest.mark.parametrize("payload", [
+    {"input": "x", "response_format": 123},
+    {"input": "x", "lang_code": 5},
+    {"input": "x", "voice": ["af_heart"]},
+])
+def test_wrong_field_types_are_400_not_crashes(server, payload):
+    url, model, _ = server
+    assert error_of(url, payload)[0] == 400
+    assert model.calls == []
+
+
+def test_failed_synthesis_never_logs_the_text(snapshot, caplog):
+    secret = "my bank PIN is 4321"
+
+    class Exploding:
+        def generate(self, text, **kwargs):
+            raise RuntimeError(f"cannot phonemize {text!r}")
+            yield  # pragma: no cover
+
+    engine = ks.Engine("repo/x", "a" * 40, loader=Exploding, snapshot=snapshot)
+    engine.load()
+    httpd = ks.serve(engine, "127.0.0.1", 0, "af_heart")
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with caplog.at_level("DEBUG"):
+            code, message = error_of(url, {"input": secret})
+    finally:
+        httpd.shutdown()
+    # A model error is a 500, not the "not loaded" 503, and its message is never echoed.
+    assert code == 500
+    assert secret not in caplog.text and secret not in message
+
+
+@pytest.mark.parametrize("exc_type", [KeyError, ValueError, LookupError, IndexError])
+def test_generic_failure_logs_type_only(snapshot, caplog, exc_type):
+    secret = "private sentence"
+
+    class Broken:
+        def generate(self, text, **kwargs):
+            raise exc_type(text)
+            yield  # pragma: no cover
+
+    engine = ks.Engine("repo/x", "a" * 40, loader=Broken, snapshot=snapshot)
+    engine.load()
+    httpd = ks.serve(engine, "127.0.0.1", 0, "af_heart")
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    try:
+        with caplog.at_level("DEBUG"):
+            code, message = error_of(url, {"input": secret})
+    finally:
+        httpd.shutdown()
+    assert code == 500 and exc_type.__name__ in caplog.text
+    assert secret not in caplog.text and secret not in message
+
+
+def test_offline_package_check(monkeypatch):
+    monkeypatch.setattr(ks, "OFFLINE_PACKAGES", ("definitely_not_installed_pkg_xyz",))
+    with pytest.raises(SystemExit, match="definitely_not_installed_pkg_xyz"):
+        ks.check_offline_packages()
+    monkeypatch.setattr(ks, "OFFLINE_PACKAGES", ("json",))
+    ks.check_offline_packages()
+
+
 def test_invalid_json(server):
     url, _model, _ = server
     assert error_of(url, None, raw=b"{nope")[0] == 400
