@@ -172,7 +172,10 @@ class TorchKokoro:
     def _get_pipeline(self, lang_code: str) -> Any:
         if lang_code not in self._pipelines:
             from kokoro import KPipeline
-            self._pipelines[lang_code] = KPipeline(lang_code=lang_code, repo_id=self.repo, model=self.kmodel)
+            pipeline = KPipeline(lang_code=lang_code, repo_id=self.repo, model=self.kmodel)
+            # Engine passes one validated .pt path; load_voice would split it on commas into a voice blend.
+            pipeline.load_voice = pipeline.load_single_voice
+            self._pipelines[lang_code] = pipeline
         return self._pipelines[lang_code]
 
     def generate(self, text: str, voice: str, lang_code: str, speed: float) -> Any:

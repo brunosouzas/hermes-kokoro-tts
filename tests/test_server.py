@@ -7,6 +7,8 @@ import urllib.request
 import wave
 import io
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -316,14 +318,23 @@ class FakeKModel:
 
 class FakeKPipeline:
     """Stands in for kokoro.KPipeline; like the real one, generate_from_tokens calls ``model`` and
-    reads ``model.device``."""
+    reads ``model.device``, and load_voice reads a comma-separated voice as a blend."""
     built = []
+    loaded = []
 
     def __init__(self, lang_code, repo_id, model):
         self.lang_code, self.model = lang_code, model
         FakeKPipeline.built.append((lang_code, repo_id))
 
+    def load_single_voice(self, voice):
+        FakeKPipeline.loaded.append(voice)
+        return voice
+
+    def load_voice(self, voice):
+        return [self.load_single_voice(v) for v in voice.split(",")]
+
     def __call__(self, text, voice, speed):
+        self.load_voice(voice)
         yield FakeResult(self.model(f"{self.lang_code}:{text}", voice, speed))
 
     def g2p(self, text):
@@ -331,6 +342,7 @@ class FakeKPipeline:
 
     def generate_from_tokens(self, phonemes, voice, speed, model):
         assert model.device == "cpu"
+        self.load_voice(voice)
 
         class Result:
             class output:
@@ -344,7 +356,7 @@ def torch_backend(monkeypatch, snapshot):
     import types
     fake = types.ModuleType("kokoro")
     fake.KModel, fake.KPipeline = FakeKModel, FakeKPipeline
-    FakeKPipeline.built = []
+    FakeKPipeline.built, FakeKPipeline.loaded = [], []
     monkeypatch.setitem(sys.modules, "kokoro", fake)
     monkeypatch.setattr(ks, "MLX", False)
     monkeypatch.setattr(ks, "VOICE_SUFFIX", ".pt")
@@ -373,6 +385,14 @@ def test_linux_backend_splices_english_words_through_the_same_model(torch_backen
     engine.synthesize("O pipeline.", "pf_dora", "p", 1.0, ["pipeline"], "b")
     assert engine._model.kmodel.inferences == ["p:o b:pipeline."]
     assert engine.voices() == ["af_heart", "pf_dora"]  # only the .pt files count
+
+
+def test_linux_backend_reads_a_voice_path_with_a_comma_as_one_file(torch_backend):
+    model = ks.TorchKokoro(Path("/srv/a,b/snap"), "hexgrad/Kokoro-82M")
+    voice = "/srv/a,b/snap/voices/pf_dora.pt"
+    list(model.generate("Olá", voice, "p", 1.0))
+    list(model._get_pipeline("p").generate_from_tokens("p:olá", voice=voice, speed=1.0, model=model))
+    assert FakeKPipeline.loaded == [voice, voice]
 
 
 def test_macos_backend_loads_mlx_audio(monkeypatch, snapshot):
