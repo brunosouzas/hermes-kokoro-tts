@@ -1,4 +1,4 @@
-"""Local Kokoro text-to-speech server (Apple Silicon, MLX).
+"""Local Kokoro text-to-speech server (MLX on Apple Silicon, PyTorch on Linux).
 
 Runs in its own virtual environment, managed by ``hermes kokoro install``. It loads
 one pinned Kokoro model once and serves an OpenAI-compatible speech endpoint on the
@@ -8,7 +8,7 @@ loopback interface:
     GET  /v1/voices         voice ids available in the pinned model snapshot
     GET  /health            {"ok", "model", "revision", "loaded", "sample_rate"}
 
-Voices are resolved from the pinned snapshot on disk and passed to mlx-audio as a
+Voices are resolved from the pinned snapshot on disk and passed to the backend as a
 file path, so the server never touches the network after installation.
 """
 
@@ -39,6 +39,10 @@ LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 ENGLISH_CODES = ("a", "b")
 MAX_PHONEMES = 510  # Kokoro's limit for one inference call
 MAX_ENGLISH_WORDS = kokoro_loanwords.MAX_ENTRIES
+# The backend follows the platform: mlx-audio on macOS, the PyTorch ``kokoro`` package on CPU elsewhere (Linux).
+# Each reads its own pinned model (kokoro_service.py), whose voices come in a different file format.
+MLX = sys.platform == "darwin"
+VOICE_SUFFIX = ".safetensors" if MLX else ".pt"
 
 log = logging.getLogger("kokoro_server")
 
@@ -76,13 +80,15 @@ class Engine:
         try:
             if self._loader is not None:
                 self._model = self._loader()
-            else:
+            elif MLX:
                 import mlx.core as mx
                 from mlx_audio.tts.utils import load_model
                 self.snapshot()  # fail early if the pinned snapshot is missing
                 model = load_model(self.repo, revision=self.revision)
                 mx.eval(model.parameters())
                 self._model = model
+            else:
+                self._model = TorchKokoro(self.snapshot(), self.repo)
             log.info("model ready: %s@%s", self.repo, self.revision[:8])
         except Exception as exc:  # reported through /health; requests return 503
             self.error = f"{type(exc).__name__}: {exc}"
@@ -90,12 +96,12 @@ class Engine:
 
     def voices(self) -> list[str]:
         folder = self.snapshot() / "voices"
-        return sorted(p.stem for p in folder.glob("*.safetensors") if kokoro_voices.is_valid_voice_id(p.stem))
+        return sorted(p.stem for p in folder.glob(f"*{VOICE_SUFFIX}") if kokoro_voices.is_valid_voice_id(p.stem))
 
     def voice_path(self, voice: str) -> Path:
         if not kokoro_voices.is_valid_voice_id(voice):
             raise ValueError(f"invalid voice id {voice!r}")
-        path = self.snapshot() / "voices" / f"{voice}.safetensors"
+        path = self.snapshot() / "voices" / f"{voice}{VOICE_SUFFIX}"
         if not path.is_file():
             raise VoiceNotFound(f"voice {voice!r} is not in the installed model")
         return path
@@ -145,6 +151,34 @@ class Engine:
         return _to_pcm(pieces)
 
 
+class TorchKokoro:
+    """What Engine uses of mlx-audio's Kokoro model, on the PyTorch ``kokoro`` package (CPU)."""
+
+    def __init__(self, snapshot: Path, repo: str):
+        from kokoro import KModel
+        self.repo = repo
+        self.kmodel = KModel(repo_id=repo, config=str(snapshot / "config.json"),
+                             model=str(snapshot / "kokoro-v1_0.pth")).eval()
+        self._pipelines: dict[str, Any] = {}
+
+    # Engine passes this object as generate_from_tokens(model=...), which calls it and reads its device.
+    @property
+    def device(self) -> Any:
+        return self.kmodel.device
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        return self.kmodel(*args, **kwargs)
+
+    def _get_pipeline(self, lang_code: str) -> Any:
+        if lang_code not in self._pipelines:
+            from kokoro import KPipeline
+            self._pipelines[lang_code] = KPipeline(lang_code=lang_code, repo_id=self.repo, model=self.kmodel)
+        return self._pipelines[lang_code]
+
+    def generate(self, text: str, voice: str, lang_code: str, speed: float) -> Any:
+        return self._get_pipeline(lang_code)(text, voice=voice, speed=speed)
+
+
 def _to_pcm(pieces: list) -> bytes:
     import numpy as np
     arrays = [np.asarray(p, dtype=np.float32).reshape(-1) for p in pieces]
@@ -157,13 +191,17 @@ def _to_pcm(pieces: list) -> bytes:
 def download(repo: str, revision: str, local_files_only: bool = False) -> Path:
     """Fetch (or, offline, locate) the pinned snapshot.
 
-    Uses the same file patterns as mlx-audio's own loader: huggingface_hub checks an offline
+    On macOS it uses the same file patterns as mlx-audio's own loader: huggingface_hub checks an offline
     snapshot for completeness against the patterns it is given, so the install-time download
-    and every later offline lookup must agree on them.
+    and every later offline lookup must agree on them. On Linux the patterns are the files
+    TorchKokoro reads.
     """
     from huggingface_hub import snapshot_download
-    from mlx_audio.utils import DEFAULT_ALLOW_PATTERNS
-    return Path(snapshot_download(repo, revision=revision, allow_patterns=DEFAULT_ALLOW_PATTERNS,
+    if MLX:
+        from mlx_audio.utils import DEFAULT_ALLOW_PATTERNS as patterns
+    else:
+        patterns = ["config.json", "kokoro-v1_0.pth", "voices/*.pt"]
+    return Path(snapshot_download(repo, revision=revision, allow_patterns=patterns,
                                   local_files_only=local_files_only))
 
 

@@ -77,9 +77,16 @@ def test_provider_name_does_not_shadow_a_builtin():
     assert p.name not in reserved
 
 
-def test_is_available_means_installed_and_never_touches_the_network(tmp_path, monkeypatch):
+@pytest.mark.parametrize("system,service_file", [
+    ("darwin", "Library/LaunchAgents/dev.hermes.kokoro-tts.plist"),
+    ("linux", ".config/systemd/user/dev.hermes.kokoro-tts.service"),
+])
+def test_is_available_means_installed_and_never_touches_the_network(tmp_path, monkeypatch, system, service_file):
     import socket
+    import sys
     monkeypatch.setattr("kokoro_tts.kokoro_provider.Path.home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(sys, "platform", system)
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
     def no_network(*args, **kwargs):
         raise AssertionError("is_available() must not open a socket")
@@ -87,9 +94,8 @@ def test_is_available_means_installed_and_never_touches_the_network(tmp_path, mo
 
     p = provider(8770)
     assert p.is_available() is False
-    agents = tmp_path / "Library" / "LaunchAgents"
-    agents.mkdir(parents=True)
-    (agents / "dev.hermes.kokoro-tts.plist").write_text("<plist/>")
+    (tmp_path / service_file).parent.mkdir(parents=True)
+    (tmp_path / service_file).write_text("x")
     assert p.is_available() is True
 
 

@@ -1,0 +1,12 @@
+# Direct dependencies of the Kokoro server on Linux (Python 3.11, PyTorch on CPU, x86_64 or aarch64).
+# requirements-linux.lock holds the exact, tested versions. Packages shared with macOS are pinned to the
+# versions in requirements.lock (frozen with `uv pip install -c requirements.lock` minus the MLX lines, then
+# `uv pip freeze`), so both platforms run the same G2P. torch comes from PyTorch's CPU-only wheel index as
+# direct URLs pinned by SHA-256, one per architecture; the PyPI build for x86_64 pulls in the CUDA libraries.
+# misaki[en] (through kokoro) brings the English G2P; the other languages use espeak-ng through
+# espeakng-loader, which bundles the library, so no system espeak-ng is needed.
+kokoro==0.9.4
+torch @ https://download.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-manylinux_2_28_x86_64.whl#sha256=5e38154c8896d426a5df58bf2276b603e82184dfae4f54d77dbb212f36e34f37 ; platform_machine == "x86_64"
+torch @ https://download.pytorch.org/whl/cpu/torch-2.14.1%2Bcpu-cp311-cp311-manylinux_2_28_aarch64.whl#sha256=36a03a3f87ec875ca39c8e29eccbaf0fc704605f78a3f7f179f157048c3c395e ; platform_machine == "aarch64"
+# Same pin and reason as in requirements.in: keeps English synthesis offline.
+en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl#sha256=1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85

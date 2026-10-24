@@ -1,4 +1,4 @@
-"""hermes-kokoro-tts: local Kokoro text-to-speech for Hermes Agent on Apple Silicon."""
+"""hermes-kokoro-tts: local Kokoro text-to-speech for Hermes Agent on Apple Silicon and Linux."""
 
 from __future__ import annotations
 
