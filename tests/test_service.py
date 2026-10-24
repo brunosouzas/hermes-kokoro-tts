@@ -193,3 +193,16 @@ def test_linux_restart_status_and_uninstall(cfg, linux):
     assert run.calls == [["systemctl", "--user", "disable", "--now", "test.kokoro.service"],
                          ["systemctl", "--user", "daemon-reload"]]
     assert not cfg.unit_path.exists() and not cfg.service_dir.exists()
+
+
+def test_cli_shows_why_a_service_command_failed(monkeypatch, capsys):
+    import types
+
+    def fail(cfg):
+        raise subprocess.CalledProcessError(1, ["systemd-analyze", "--user", "verify", "x"],
+                                            stderr=b"x.service: Failed to create directory: Permission denied\n")
+    monkeypatch.setattr(svc, "install", fail)
+    handler = kokoro_cli.make_handler(lambda k, d=None: d, lambda: None)
+    assert handler(types.SimpleNamespace(kokoro_command="install")) == 1
+    out = capsys.readouterr().out
+    assert "returned non-zero exit status 1" in out and "Permission denied" in out

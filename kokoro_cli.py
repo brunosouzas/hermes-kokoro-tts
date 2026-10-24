@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -125,6 +126,9 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any],
                 return 2
         except Exception as exc:
             print(f"error: {exc}")
+            # launchctl, plutil, systemctl and systemd-analyze run with captured output: show why they failed.
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+                print(exc.stderr.decode(errors="replace").strip())
             return 1
         return 0
     return handler
