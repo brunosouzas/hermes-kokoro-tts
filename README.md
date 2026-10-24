@@ -125,6 +125,8 @@ hermes plugins validate .
 
 Tests use a fake model and stand-in HTTP servers, so they run anywhere; they import Hermes' `agent.tts_provider` from `HERMES_AGENT_REPO` (default `~/.hermes/hermes-agent`) when it is available.
 
+GitHub Actions runs the same tests on Ubuntu and macOS for every pull request (`.github/workflows/tests.yml`), against the Hermes Agent version in `requires_hermes`.
+
 ## Licence
 
 MIT. Kokoro-82M is Apache-2.0 ([hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)); the MLX conversion is [mlx-community/Kokoro-82M-bf16](https://huggingface.co/mlx-community/Kokoro-82M-bf16); inference uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) (MIT).
