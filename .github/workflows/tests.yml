@@ -1,0 +1,56 @@
+# Runs the test suite on Linux and macOS. The tests use a fake model and stand-in HTTP servers,
+# so neither job downloads Kokoro or needs MLX or PyTorch.
+name: tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pytest:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The provider base class comes from the oldest Hermes the plugin supports
+      # (requires_hermes in plugin.yaml), so the tests check the real contract, not the stand-in.
+      - name: Check out Hermes Agent (agent/ only)
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: NousResearch/hermes-agent
+          ref: v0.22.2
+          path: .hermes-agent
+          sparse-checkout: agent
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+
+      - name: Create the test environment
+        run: |
+          uv venv .venv --python 3.11
+          uv pip install --python .venv/bin/python "pytest>=8,<10" "numpy>=1.26,<3"
+
+      - name: Fail if the Hermes provider base class does not import
+        env:
+          HERMES_AGENT_REPO: ${{ github.workspace }}/.hermes-agent
+        run: .venv/bin/python -c "import sys; sys.path.append('$HERMES_AGENT_REPO'); import agent.tts_provider"
+
+      - name: Run the tests
+        env:
+          HERMES_AGENT_REPO: ${{ github.workspace }}/.hermes-agent
+        run: .venv/bin/python -m pytest -q
