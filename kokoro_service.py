@@ -83,6 +83,13 @@ class ServiceConfig:
         return self.service_dir / ".venv" / "bin" / "python"
 
     @property
+    def launcher(self) -> Path:
+        """What launchd and systemd start: a link to the venv's python named after the service, so
+        macOS Login Items and process lists show "kokoro-tts" instead of "python". Python still finds
+        the venv, because pyvenv.cfg is looked up next to the path it was started from."""
+        return self.service_dir / ".venv" / "bin" / "kokoro-tts"
+
+    @property
     def hf_home(self) -> Path:
         return self.service_dir / "hf-home"
 
@@ -126,7 +133,7 @@ def find_uv() -> str:
 
 
 def _server_args(cfg: ServiceConfig, repo: str, revision: str) -> list[str]:
-    args = [str(cfg.python), str(cfg.service_dir / "server" / "kokoro_server.py"),
+    args = [str(cfg.launcher), str(cfg.service_dir / "server" / "kokoro_server.py"),
             "--host", "127.0.0.1", "--port", str(cfg.port),
             "--model", repo, "--revision", revision, "--default-voice", cfg.default_voice]
     for voice in cfg.prime_voices:
@@ -216,6 +223,15 @@ def _domain() -> str:
     return f"gui/{os.getuid()}"
 
 
+def _link_launcher(cfg: ServiceConfig) -> None:
+    """(Re)create cfg.launcher as a relative link to ``python`` in the same folder. A fresh venv has
+    no such link, and an old one may point elsewhere, so it is replaced every install."""
+    cfg.launcher.parent.mkdir(parents=True, exist_ok=True)
+    if cfg.launcher.is_symlink() or cfg.launcher.exists():
+        cfg.launcher.unlink()
+    cfg.launcher.symlink_to("python")
+
+
 def install(cfg: ServiceConfig, run: Runner = subprocess.run, say: Callable[[str], None] = print) -> None:
     """Build the environment, download the pinned model and (re)start the launchd agent or systemd unit.
     Idempotent."""
@@ -235,6 +251,7 @@ def install(cfg: ServiceConfig, run: Runner = subprocess.run, say: Callable[[str
         run([uv, "venv", "--python", PYTHON_VERSION, str(cfg.service_dir / ".venv")], check=True, env=env)
     run([uv, "pip", "sync", "--python", str(cfg.python), str(LINUX_REQUIREMENTS if linux else REQUIREMENTS)],
         check=True, env=env)
+    _link_launcher(cfg)
 
     say(f"Downloading {repo} at revision {revision[:8]} (~340 MB, once)...")
     run([str(cfg.python), "-I", str(server_dir / "kokoro_server.py"), "--download",

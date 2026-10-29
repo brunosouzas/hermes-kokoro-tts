@@ -46,7 +46,7 @@ def test_plist_is_valid_loopback_and_pinned(cfg):
     plist = plistlib.loads(svc.render_plist(cfg).encode())
     args = plist["ProgramArguments"]
     assert plist["Label"] == "test.kokoro" and plist["KeepAlive"] is True
-    assert args[0] == str(cfg.python)
+    assert args[0] == str(cfg.launcher) and cfg.launcher.name == "kokoro-tts"
     assert args[args.index("--host") + 1] == "127.0.0.1" and args[args.index("--port") + 1] == "8799"
     assert args[args.index("--revision") + 1] == svc.MODEL_REVISION and len(svc.MODEL_REVISION) == 40
     assert args[args.index("--default-voice") + 1] == "pf_dora"
@@ -69,6 +69,16 @@ def test_install_builds_env_downloads_model_and_starts(cfg, monkeypatch, macos):
     assert (cfg.service_dir / "server" / "kokoro_server.py").is_file()
     assert (cfg.service_dir / "server" / "kokoro_voices.py").is_file()
     assert cfg.plist_path.is_file()
+    assert cfg.launcher.is_symlink() and str(cfg.launcher.readlink()) == "python"
+
+
+def test_install_replaces_a_stale_launcher(cfg, monkeypatch, macos):
+    monkeypatch.setattr(svc, "check_platform", lambda: None)
+    monkeypatch.setattr(svc, "find_uv", lambda: "/opt/uv")
+    cfg.launcher.parent.mkdir(parents=True)
+    cfg.launcher.write_text("not a link")
+    svc.install(cfg, run=Runner(loaded_checks=1), say=lambda m: None)
+    assert cfg.launcher.is_symlink() and str(cfg.launcher.readlink()) == "python"
 
 
 def test_install_skips_venv_creation_when_present(cfg, monkeypatch):
@@ -147,7 +157,7 @@ def test_unit_is_loopback_pinned_offline_and_restarts(cfg):
     cfg.prime_voices = ("bf_emma",)
     unit = parse_unit(svc.render_unit(cfg))
     args = shlex.split(unit["ExecStart"][0])
-    assert args[:2] == [str(cfg.python), str(cfg.service_dir / "server" / "kokoro_server.py")]
+    assert args[:2] == [str(cfg.launcher), str(cfg.service_dir / "server" / "kokoro_server.py")]
     assert args[args.index("--host") + 1] == "127.0.0.1" and args[args.index("--port") + 1] == "8799"
     assert args[args.index("--model") + 1] == svc.LINUX_MODEL_REPO == "hexgrad/Kokoro-82M"
     assert args[args.index("--revision") + 1] == svc.LINUX_MODEL_REVISION and len(svc.LINUX_MODEL_REVISION) == 40
@@ -162,7 +172,7 @@ def test_unit_takes_odd_paths_literally(cfg):
     unit = parse_unit(svc.render_unit(cfg))
     exec_start = unit["ExecStart"][0]
     # systemd expands % everywhere and $ in arguments, but not in the command itself.
-    assert exec_start.startswith('"/srv/a b%%c$d\\"e/.venv/bin/python" "/srv/a b%%c$$d\\"e/server/kokoro_server.py"')
+    assert exec_start.startswith('"/srv/a b%%c$d\\"e/.venv/bin/kokoro-tts" "/srv/a b%%c$$d\\"e/server/kokoro_server.py"')
     assert '"HF_HOME=/srv/a b%%c$d\\"e/hf-home"' in unit["Environment"]
     cfg.service_dir = Path("/srv/a\nExecStartPre=/bin/evil")
     with pytest.raises(ValueError, match="line break"):
