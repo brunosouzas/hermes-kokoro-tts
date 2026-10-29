@@ -11,9 +11,14 @@ from __future__ import annotations
 import re
 from typing import Optional
 
-# Function words that are common in one language and absent (or rare) in the other. Words that
-# exist in both, or that are ordinary words in the other language, are left out on purpose:
-# "a", "do", "no", "as", "me", "so", "for" (pt "se for"), "era", "ate", "com" (".com").
+# Function words that are common in one language and absent (or rare) in the others. Words that
+# exist in two of them, or that are ordinary words in another one, are left out on purpose:
+# "a", "do", "no", "as", "me", "so", "for" (pt "se for"), "era", "ate", "com" (".com"); for Italian
+# also "i", "in", "per", "con", "come", "ha" (English), "e", "da", "sei", "quando", "se", "tu",
+# "lei", "tua", "posso", "deve", "sempre" (Portuguese), "lo"/"la" (the Portuguese "fazê-lo"),
+# "sono", "sul", "prego", "né" (Portuguese sleep, south, nail, "não é"), "dove", "fare" (English), and "io",
+# "mi", "sto" (socket.io, MI200, STO). An all-capitals token (DI, DEL, MA) is an acronym, not an
+# Italian word.
 _FUNCTION_WORDS: dict[str, frozenset[str]] = {
     "en": frozenset("""
         the and is are was were be been being to of in it its you your yours that this these those
@@ -27,14 +32,38 @@ _FUNCTION_WORDS: dict[str, frozenset[str]] = {
         você voce vocês está esta estão são foi ser ter tem têm isso isto esse essa este
         aquele aquela como quando onde porque também tambem já ja ainda muito muita seu sua seus
         suas meu minha nosso nossa ele ela eles elas nós lhe dos das num numa ao aos à às
+        àquele àquela àqueles àquelas àquilo
         sim olá ola obrigado obrigada hoje agora aqui depois antes então entao sobre até
         fazer feito pode podem vai vamos estou tenho
     """.split()),
+    "it": frozenset("""
+        il le un uno una gli di del dello della delle degli nel nello nella nelle negli alla allo
+        alle agli dal dalla dalle sulla sulle che non è c'è perché poiché benché finché affinché
+        nonché anche ancora più molto molta molti poco questo questa questi queste quello quella
+        siamo siete ho hai abbiamo avete hanno stato stata essere fatto ciao grazie ecco bene
+        buongiorno buonasera allora però così già
+        sì oggi domani ieri adesso qui dopo forse niente nulla tutto tutti tutta nessun nessuno
+        nessuna cosa vorrei voglio puoi può stai lui noi voi loro mio mia tuo nostro nostra ma
+    """.split()),
 }
 # ã, õ and ç are Portuguese; the acute and circumflex accents also show up in English loanwords
-# (café, résumé), so they are a weak signal: at most one point per word.
+# (café, résumé), so they are a weak signal: at most one point per word. When Italian is scored
+# too, an Italian function word (perché) gets no such point, and neither does the grave à:
+# Portuguese only writes it in the crase (a function word above), and Italian writes it too
+# (città, già).
 _PT_STRONG = re.compile(r"[ãõç]", re.IGNORECASE)
 _PT_WEAK = re.compile(r"[âêôàáéíóú]", re.IGNORECASE)
+_PT_WEAK_NEXT_TO_IT = re.compile(r"[âêôáéíóú]", re.IGNORECASE)
+# è, ì, ò and ù are Italian (Portuguese has no such letters): one point per word.
+_IT_ACCENT = re.compile(r"[èìòù]", re.IGNORECASE)
+# Italian elision: "l'aggiornamento", "un'altra", "dell'anno", with either apostrophe. At least
+# two letters after it, so English "all's" does not count.
+_IT_ELISION = re.compile(r"(?<![^\W\d_])(?:l|un|dell|nell|dall|sull|all|quell|quest|nessun)['’][^\W\d_]{2,}",
+                         re.IGNORECASE)
+# Italian writes no function word inside a hyphenated compound or an identifier, so
+# "non-blocking", "non-2xx", "un-hide", "use_non_blocking" and the Portuguese "fazê-lo" give
+# Italian no point.
+_COMPOUND = re.compile(r"\S*[-_]\S*")
 _WORD = re.compile(r"[^\W\d_]+(?:'[^\W\d_]+)?", re.UNICODE)
 # Text a language signal must not come from: URLs, e-mail addresses, inline code, paths.
 _NOT_PROSE = re.compile(r"https?://\S+|www\.\S+|\S+@\S+\.\S+|`[^`]*`|(?:\S*/\S+)")
@@ -49,18 +78,35 @@ _ABBREVIATIONS = frozenset("""
 _TOKEN_BEFORE = re.compile(r"(\S+)$")
 
 SUPPORTED = tuple(_FUNCTION_WORDS)
+# Detected whatever the voice map says, as before Italian existed. Any other language is scored
+# only when it has a voice, so its false positives cannot move a sentence for someone who never
+# asked for it (an unmapped language would switch the sentence to the default voice).
+ALWAYS_DETECTED = ("en", "pt")
 
 
-def detect(text: str) -> Optional[str]:
-    """``"pt"``, ``"en"`` or ``None`` when the sentence gives no clear signal."""
+def languages_for(voices: dict[str, str]) -> tuple[str, ...]:
+    return tuple(lang for lang in SUPPORTED if lang in ALWAYS_DETECTED or lang in voices)
+
+
+def detect(text: str, languages: tuple[str, ...] = SUPPORTED) -> Optional[str]:
+    """The language of ``languages`` (``"pt"``, ``"en"``, ``"it"``) the sentence is in, or
+    ``None`` when it gives no clear signal."""
     prose = _NOT_PROSE.sub(" ", text)
     words = [w.lower() for w in _WORD.findall(prose)]
     if not words:
         return None
-    scores = {lang: sum(1 for w in words if w in vocab) for lang, vocab in _FUNCTION_WORDS.items()}
-    scores["pt"] += 2 * len(_PT_STRONG.findall(prose))
-    scores["pt"] += sum(1 for w in words if _PT_WEAK.search(w) and not _PT_STRONG.search(w))
-    ordered = sorted(scores.values(), reverse=True)
+    italian = "it" in languages
+    scores = {lang: sum(1 for w in words if w in _FUNCTION_WORDS[lang]) for lang in languages if lang != "it"}
+    if "pt" in scores:
+        weak = _PT_WEAK_NEXT_TO_IT if italian else _PT_WEAK
+        scores["pt"] += 2 * len(_PT_STRONG.findall(prose))
+        scores["pt"] += sum(1 for w in words if weak.search(w) and not _PT_STRONG.search(w)
+                            and not (italian and w in _FUNCTION_WORDS["it"]))
+    if italian:
+        scores["it"] = sum(1 for w in _WORD.findall(_COMPOUND.sub(" ", prose))
+                           if w.lower() in _FUNCTION_WORDS["it"] and not (len(w) > 1 and w.isupper()))
+        scores["it"] += sum(1 for w in words if _IT_ACCENT.search(w)) + len(_IT_ELISION.findall(prose))
+    ordered = sorted(scores.values(), reverse=True) + [0]
     if ordered[0] == 0 or ordered[0] == ordered[1]:
         return None
     return max(scores, key=lambda lang: scores[lang])
@@ -109,8 +155,9 @@ def plan(text: str, voices: dict[str, str], default_voice: str) -> list[tuple[st
     """
     runs: list[tuple[str, str]] = []
     current = default_voice
+    languages = languages_for(voices)
     for sentence in split_sentences(text):
-        lang = detect(sentence)
+        lang = detect(sentence, languages)
         if lang is not None:
             current = voices.get(lang, default_voice)
         if runs and runs[-1][1] == current:

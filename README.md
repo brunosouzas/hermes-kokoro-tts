@@ -56,7 +56,7 @@ hermes config set plugins.entries.kokoro-tts.settings.voices.en bf_emma
 hermes kokoro install                                                        # loads both voices at start-up
 ```
 
-A reply in English is spoken by `bf_emma`, one in Portuguese by `pf_dora`, and a mixed reply switches at sentence boundaries. A sentence with no clear language (a name, a number) keeps the previous voice. Detection counts common function words and accents. It is built into the plugin, needs no extra package, and currently tells Portuguese from English. It works on whole sentences: an English word inside a Portuguese sentence ("o pipeline terminou") still gets the Portuguese pronunciation, because switching voices mid-sentence sounds worse than an accent. Setting `tts.voice` turns switching off.
+A reply in English is spoken by `bf_emma`, one in Portuguese by `pf_dora`, and a mixed reply switches at sentence boundaries. A sentence with no clear language (a name, a number) keeps the previous voice. Detection counts common function words and accents. It is built into the plugin, needs no extra package, and tells Portuguese, English and Italian apart (for Italian, add `voices.it`, e.g. `im_nicola` or `if_sara`). A `voices` entry for any other language, or whose value is not a well-formed voice id, is ignored: `hermes kokoro install` prints a warning for it, and Hermes logs one. It works on whole sentences: an English word inside a Portuguese sentence ("o pipeline terminou") still gets the Portuguese pronunciation, because switching voices mid-sentence sounds worse than an accent. Setting `tts.voice` turns switching off.
 
 ### English words inside other languages
 
@@ -73,7 +73,7 @@ No list can know in advance which words you use, so it is meant to grow: when yo
 
 Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for `voice` and every voice in `voices`, so run `hermes kokoro install` again after changing either. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
 
-Languages tested by the author: Brazilian Portuguese and English. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
+Languages tested by the author: Brazilian Portuguese and English. Italian detection is checked against a set of everyday sentences in the tests, but the author does not speak Italian, so reports from Italian speakers are especially welcome. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
 
 ## Settings
 

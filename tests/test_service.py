@@ -115,6 +115,21 @@ def test_cli_config_primes_mapped_voices_once():
     assert cfg.default_voice == "pf_dora" and cfg.prime_voices == ("bf_emma",)
 
 
+def test_cli_config_primes_only_voices_a_sentence_can_reach():
+    values = {"voice": "af_heart", "voices": {"it": "im_nicola", "es": "ef_dora"}}
+    cfg = kokoro_cli.service_config(lambda k, d=None: values.get(k, d))
+    assert cfg.prime_voices == ("im_nicola",)
+
+
+def test_install_warns_about_unusable_voice_map_entries(monkeypatch, capsys):
+    values = {"voices": {"pt": "pf_dora", "es": "ef_dora"}}
+    monkeypatch.setattr(svc, "install", lambda cfg: None)
+    handler = kokoro_cli.make_handler(lambda k, d=None: values.get(k, d), provider_factory=lambda: None)
+    assert handler(type("Args", (), {"kokoro_command": "install"})()) == 0
+    out = capsys.readouterr().out
+    assert "warning: voices.es" in out and "ef_dora" in out
+
+
 def test_cli_config_from_settings(tmp_path):
     values = {"port": "8801", "service_dir": str(tmp_path / "s"), "voice": "pf_dora"}
     cfg = kokoro_cli.service_config(lambda k, d=None: values.get(k, d))
