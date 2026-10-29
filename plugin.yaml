@@ -2,7 +2,7 @@ name: kokoro-tts
 version: 0.4.0
 manifest_version: 2
 api_version: 1
-description: "Local Kokoro text-to-speech on Apple Silicon (MLX) and Linux (PyTorch on CPU): tts.provider kokoro-mlx, 9 languages, a voice per language (switches per sentence between Portuguese, English and Italian), a dictionary of English words the same voice pronounces in English, sentence streaming, nothing leaves the machine."
+description: "Local Kokoro text-to-speech on Apple Silicon (MLX) and Linux (PyTorch on CPU): tts.provider kokoro-mlx, a voice per language (switches per sentence between Portuguese, English and Italian), a dictionary of English words the same voice pronounces in English, sentence streaming, nothing leaves the machine."
 author: "Bruno Souza (@brunosouzas)"
 license: MIT
 homepage: https://github.com/brunosouzas/hermes-kokoro-tts
@@ -23,7 +23,7 @@ config_schema:
     type: str
     default: af_heart
     label: Voice
-    description: "Kokoro voice id, e.g. af_heart (US English), bf_emma (UK English), pf_dora (Brazilian Portuguese), ef_dora (Spanish). `hermes kokoro voices` lists them. tts.voice, when set, wins."
+    description: "Kokoro voice id, e.g. af_heart (US English), bf_emma (UK English), pf_dora (Brazilian Portuguese), im_nicola (Italian). `hermes kokoro voices` lists them. tts.voice, when set, wins."
   voices:
     type: dict
     default: {}
