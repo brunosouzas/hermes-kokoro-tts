@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 import threading
 import urllib.error
 import urllib.request
@@ -16,7 +17,7 @@ from agent.tts_provider import TTSProvider
 from . import kokoro_language as language
 from . import kokoro_voices as voices
 from .kokoro_loanwords import MAX_ENTRIES
-from .kokoro_service import DEFAULT_LABEL, LOOPBACK_OPENER, parse_port
+from .kokoro_service import LOOPBACK_OPENER, ServiceConfig, parse_port
 
 SAMPLE_RATE = 24000
 CONNECT_TIMEOUT = 0.25
@@ -90,7 +91,7 @@ class KokoroTTSProvider(TTSProvider):
 
     @property
     def display_name(self) -> str:
-        return "Kokoro (local, Apple Silicon)"
+        return "Kokoro (local, Apple Silicon)" if sys.platform == "darwin" else "Kokoro (local, CPU)"
 
     # ---- settings ---------------------------------------------------------------------------
     @property
@@ -157,15 +158,12 @@ class KokoroTTSProvider(TTSProvider):
 
     # ---- availability -------------------------------------------------------------------------
     def is_available(self) -> bool:
-        """The server is installed (its launchd agent exists). Pickers call this on every paint, so
+        """The server is installed (its launchd agent or systemd unit exists). Pickers call this on every paint, so
         the contract forbids network calls; a stopped server surfaces as a clear synthesize() error."""
         try:
-            return self._plist_path().is_file()
+            return ServiceConfig().service_file.is_file()
         except OSError:
             return False
-
-    def _plist_path(self) -> Path:
-        return Path.home() / "Library" / "LaunchAgents" / f"{DEFAULT_LABEL}.plist"
 
     def _server_reachable(self) -> bool:
         try:
@@ -183,7 +181,8 @@ class KokoroTTSProvider(TTSProvider):
         return [voices.describe(v) for v in ids if voices.is_valid_voice_id(v)]
 
     def list_models(self) -> list[dict[str, Any]]:
-        return [{"id": "kokoro-82m", "display": "Kokoro-82M (MLX, bf16)"}]
+        backend = "MLX, bf16" if sys.platform == "darwin" else "PyTorch, CPU"
+        return [{"id": "kokoro-82m", "display": f"Kokoro-82M ({backend})"}]
 
     def default_model(self) -> Optional[str]:
         return "kokoro-82m"

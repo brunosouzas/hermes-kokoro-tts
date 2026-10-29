@@ -1,4 +1,4 @@
-"""The HTTP server, with a fake model in place of MLX (runs on any platform)."""
+"""The HTTP server, with a fake model in place of MLX or PyTorch (runs on any platform)."""
 
 import json
 import threading
@@ -6,6 +6,8 @@ import urllib.error
 import urllib.request
 import wave
 import io
+
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -32,8 +34,8 @@ class FakeModel:
 def snapshot(tmp_path):
     (tmp_path / "voices").mkdir()
     for name in ("af_heart", "pf_dora"):
-        (tmp_path / "voices" / f"{name}.safetensors").write_bytes(b"x")
-    (tmp_path / "voices" / "not a voice.safetensors").write_bytes(b"x")
+        (tmp_path / "voices" / f"{name}{ks.VOICE_SUFFIX}").write_bytes(b"x")
+    (tmp_path / "voices" / f"not a voice{ks.VOICE_SUFFIX}").write_bytes(b"x")
     return tmp_path
 
 
@@ -78,7 +80,7 @@ def test_wav_response_and_voice_resolved_to_snapshot_file(server, snapshot):
         assert (w.getnchannels(), w.getsampwidth(), w.getframerate(), w.getnframes()) == (1, 2, 24000, 4800)
         frames = np.frombuffer(w.readframes(4800), dtype="<i2")
     assert frames[0] == 16383 and frames[-1] == -32767
-    assert model.calls[-1] == {"text": "Olá", "voice": str(snapshot / "voices" / "pf_dora.safetensors"),
+    assert model.calls[-1] == {"text": "Olá", "voice": str(snapshot / "voices" / f"pf_dora{ks.VOICE_SUFFIX}"),
                                "lang_code": "p", "speed": 1.0}
 
 
@@ -238,7 +240,7 @@ def test_listed_words_are_spliced_per_sentence_and_the_rest_is_normal(loan_serve
         body = resp.read()
     # Portuguese phonemes around, British English for the listed word, same Dora voice.
     assert model.token_calls == [{"phonemes": "p:o b:pipeline p:terminou.",
-                                  "voice": str(snapshot / "voices" / "pf_dora.safetensors")}]
+                                  "voice": str(snapshot / "voices" / f"pf_dora{ks.VOICE_SUFFIX}")}]
     assert [c["text"] for c in model.calls] == ["Nada mais hoje."]  # no listed word: normal path
     assert len(body) == (2400 + 4800) * 2
 
@@ -296,3 +298,138 @@ def test_refuses_non_loopback(snapshot):
     engine = ks.Engine("repo/x", "a" * 40, loader=lambda: None, snapshot=snapshot)
     with pytest.raises(SystemExit):
         ks.serve(engine, "0.0.0.0", 0, "af_heart")
+
+
+class FakeKModel:
+    """Stands in for kokoro.KModel: records how it was built and every inference call."""
+
+    def __init__(self, repo_id, config, model):
+        self.built_from = (repo_id, config, model)
+        self.device = "cpu"
+        self.inferences = []
+
+    def eval(self):
+        return self
+
+    def __call__(self, phonemes, ref_s, speed, return_output=False):
+        self.inferences.append(phonemes)
+        return np.full(2400, 0.5, dtype=np.float32)
+
+
+class FakeKPipeline:
+    """Stands in for kokoro.KPipeline; like the real one, generate_from_tokens calls ``model`` and
+    reads ``model.device``, and load_voice reads a comma-separated voice as a blend."""
+    built = []
+    loaded = []
+
+    def __init__(self, lang_code, repo_id, model):
+        self.lang_code, self.model = lang_code, model
+        FakeKPipeline.built.append((lang_code, repo_id))
+
+    def load_single_voice(self, voice):
+        FakeKPipeline.loaded.append(voice)
+        return voice
+
+    def load_voice(self, voice):
+        return [self.load_single_voice(v) for v in voice.split(",")]
+
+    def __call__(self, text, voice, speed):
+        self.load_voice(voice)
+        yield FakeResult(self.model(f"{self.lang_code}:{text}", voice, speed))
+
+    def g2p(self, text):
+        return " ".join(f"{self.lang_code}:{w.lower()}" for w in text.split()), None
+
+    def generate_from_tokens(self, phonemes, voice, speed, model):
+        assert model.device == "cpu"
+        self.load_voice(voice)
+
+        class Result:
+            class output:
+                audio = model(phonemes, voice, speed)
+        yield Result()
+
+
+@pytest.fixture
+def torch_backend(monkeypatch, snapshot):
+    import sys
+    import types
+    fake = types.ModuleType("kokoro")
+    fake.KModel, fake.KPipeline = FakeKModel, FakeKPipeline
+    FakeKPipeline.built, FakeKPipeline.loaded = [], []
+    monkeypatch.setitem(sys.modules, "kokoro", fake)
+    monkeypatch.setattr(ks, "MLX", False)
+    monkeypatch.setattr(ks, "VOICE_SUFFIX", ".pt")
+    for name in ("af_heart", "pf_dora"):
+        (snapshot / "voices" / f"{name}.pt").write_bytes(b"x")
+    return snapshot
+
+
+def test_linux_backend_loads_the_snapshot_files_with_pytorch_and_never_mlx(torch_backend):
+    import sys
+    engine = ks.Engine("hexgrad/Kokoro-82M", "f" * 40, snapshot=torch_backend)
+    engine.load()
+    assert engine.error is None and isinstance(engine._model, ks.TorchKokoro)
+    assert engine._model.kmodel.built_from == ("hexgrad/Kokoro-82M", str(torch_backend / "config.json"),
+                                               str(torch_backend / "kokoro-v1_0.pth"))
+    assert "mlx" not in sys.modules and "mlx_audio" not in sys.modules
+    pcm = engine.synthesize("Olá", "pf_dora", "p", 1.0)
+    pcm += engine.synthesize("Oi de novo", "pf_dora", "p", 1.0)
+    assert len(pcm) == 2 * 2400 * 2
+    assert FakeKPipeline.built == [("p", "hexgrad/Kokoro-82M")]  # one pipeline per language, reused
+
+
+def test_linux_backend_splices_english_words_through_the_same_model(torch_backend):
+    engine = ks.Engine("hexgrad/Kokoro-82M", "f" * 40, snapshot=torch_backend)
+    engine.load()
+    engine.synthesize("O pipeline.", "pf_dora", "p", 1.0, ["pipeline"], "b")
+    assert engine._model.kmodel.inferences == ["p:o b:pipeline."]
+    assert engine.voices() == ["af_heart", "pf_dora"]  # only the .pt files count
+
+
+def test_linux_backend_reads_a_voice_path_with_a_comma_as_one_file(torch_backend):
+    model = ks.TorchKokoro(Path("/srv/a,b/snap"), "hexgrad/Kokoro-82M")
+    voice = "/srv/a,b/snap/voices/pf_dora.pt"
+    list(model.generate("Olá", voice, "p", 1.0))
+    list(model._get_pipeline("p").generate_from_tokens("p:olá", voice=voice, speed=1.0, model=model))
+    assert FakeKPipeline.loaded == [voice, voice]
+
+
+def test_macos_backend_loads_mlx_audio(monkeypatch, snapshot):
+    import sys
+    import types
+    loaded, evaluated = [], []
+    mx = types.ModuleType("mlx.core")
+    mx.eval = evaluated.append
+    utils = types.ModuleType("mlx_audio.tts.utils")
+
+    class Model:
+        def parameters(self):
+            return "params"
+    utils.load_model = lambda repo, revision: loaded.append((repo, revision)) or Model()
+    for name, module in {"mlx": types.ModuleType("mlx"), "mlx.core": mx, "mlx_audio": types.ModuleType("mlx_audio"),
+                         "mlx_audio.tts": types.ModuleType("mlx_audio.tts"), "mlx_audio.tts.utils": utils}.items():
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(ks, "MLX", True)
+    engine = ks.Engine("mlx-community/Kokoro-82M-bf16", "a" * 40, snapshot=snapshot)
+    engine.load()
+    assert engine.error is None and loaded == [("mlx-community/Kokoro-82M-bf16", "a" * 40)]
+    assert evaluated == ["params"]
+
+
+@pytest.mark.parametrize("mlx", [True, False])
+def test_download_patterns_follow_the_backend(monkeypatch, mlx):
+    import sys
+    import types
+    calls = []
+    hub = types.ModuleType("huggingface_hub")
+    hub.snapshot_download = lambda repo, **kwargs: calls.append((repo, kwargs)) or "/snap"
+    mlx_utils = types.ModuleType("mlx_audio.utils")
+    mlx_utils.DEFAULT_ALLOW_PATTERNS = ["*.safetensors", "*.json"]
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    monkeypatch.setitem(sys.modules, "mlx_audio", types.ModuleType("mlx_audio"))
+    monkeypatch.setitem(sys.modules, "mlx_audio.utils", mlx_utils)
+    monkeypatch.setattr(ks, "MLX", mlx)
+    assert str(ks.download("org/model", "r" * 40, local_files_only=True)) == "/snap"
+    expected = ["*.safetensors", "*.json"] if mlx else ["config.json", "kokoro-v1_0.pth", "voices/*.pt"]
+    assert calls == [("org/model", {"revision": "r" * 40, "allow_patterns": expected, "local_files_only": True})]

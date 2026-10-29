@@ -2,20 +2,20 @@ name: kokoro-tts
 version: 0.3.0
 manifest_version: 2
 api_version: 1
-description: "Local Kokoro text-to-speech on Apple Silicon (MLX): tts.provider kokoro-mlx, 9 languages, a voice per language (switches per sentence between Portuguese and English), a dictionary of English words the same voice pronounces in English, sentence streaming, nothing leaves the machine."
+description: "Local Kokoro text-to-speech on Apple Silicon (MLX) and Linux (PyTorch on CPU): tts.provider kokoro-mlx, 9 languages, a voice per language (switches per sentence between Portuguese and English), a dictionary of English words the same voice pronounces in English, sentence streaming, nothing leaves the machine."
 author: "Bruno Souza (@brunosouzas)"
 license: MIT
 homepage: https://github.com/brunosouzas/hermes-kokoro-tts
-tags: [tts, voice, local, mlx, kokoro, apple-silicon]
+tags: [tts, voice, local, mlx, kokoro, apple-silicon, linux]
 requires_hermes: ">=0.22.2"
-platforms: [macos]
+platforms: [macos, linux]
 # The Kokoro server runs in its own virtual environment (built by `hermes kokoro install`);
 # the plugin itself uses only the standard library inside Hermes.
 python_runtime: external
 external_dependencies:
   - name: uv
     check: "uv --version"
-    install: "brew install uv"
+    install: "macOS: brew install uv. Linux: pipx install uv, or see https://docs.astral.sh/uv/getting-started/installation/"
 provides_tools: []
 provides_hooks: []
 config_schema:
@@ -58,4 +58,4 @@ config_schema:
     type: str
     default: ""
     label: Server directory
-    description: "Where the server environment and model live. Empty = ~/Library/Application Support/hermes-kokoro-tts."
+    description: "Where the server environment and model live. Empty = ~/Library/Application Support/hermes-kokoro-tts on macOS, ${XDG_DATA_HOME:-~/.local/share}/hermes-kokoro-tts on Linux."

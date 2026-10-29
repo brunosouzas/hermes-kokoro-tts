@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Any, Callable
@@ -33,13 +34,13 @@ def service_config(setting: Setting) -> service.ServiceConfig:
 def setup_parser(subparser) -> None:
     subs = subparser.add_subparsers(dest="kokoro_command")
     subs.add_parser("install", help="Build the server environment, download the model and start it (idempotent)")
-    subs.add_parser("status", help="Show the launchd agent and server health")
+    subs.add_parser("status", help="Show the launchd agent or systemd unit and server health")
     subs.add_parser("restart", help="Restart the server")
     subs.add_parser("voices", help="List the voices of the installed model")
     say = subs.add_parser("say", help="Speak a test sentence into a WAV file")
     say.add_argument("text")
     say.add_argument("--voice", default=None)
-    rm = subs.add_parser("uninstall", help="Stop the server and remove its launchd agent")
+    rm = subs.add_parser("uninstall", help="Stop the server and remove its launchd agent or systemd unit")
     rm.add_argument("--purge", action="store_true", help="Also delete the environment and the downloaded model")
     words = subs.add_parser("words", help="English words a non-English voice says in English (list, add, remove)")
     words.add_argument("action", nargs="?", choices=("list", "add", "remove"), default="list")
@@ -125,6 +126,9 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any],
                 return 2
         except Exception as exc:
             print(f"error: {exc}")
+            # launchctl, plutil, systemctl and systemd-analyze run with captured output: show why they failed.
+            if isinstance(exc, subprocess.CalledProcessError) and exc.stderr:
+                print(exc.stderr.decode(errors="replace").strip())
             return 1
         return 0
     return handler
