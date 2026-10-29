@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Callable
 
+from . import kokoro_language as language
 from . import kokoro_loanwords as loanwords
 from . import kokoro_service as service
 from . import kokoro_voices as voices
@@ -20,9 +21,8 @@ def service_config(setting: Setting) -> service.ServiceConfig:
     default_voice = setting("voice", "af_heart") or "af_heart"
     if not voices.is_valid_voice_id(default_voice):
         default_voice = "af_heart"
-    raw_map = setting("voices", None)
-    mapped = raw_map.values() if isinstance(raw_map, dict) else ()
-    prime = tuple(dict.fromkeys(v for v in mapped if voices.is_valid_voice_id(v) and v != default_voice))
+    mapped, _problems = voices.voice_map(setting("voices", None), language.SUPPORTED)
+    prime = tuple(dict.fromkeys(v for v in mapped.values() if v != default_voice))
     return service.ServiceConfig(
         port=service.parse_port(setting("port", None)),
         service_dir=Path(raw_dir).expanduser() if raw_dir else service.DEFAULT_SERVICE_DIR,
@@ -80,6 +80,8 @@ def make_handler(setting: Setting, provider_factory: Callable[[], Any],
                 raw_port = setting("port", None)
                 if raw_port not in (None, "") and str(raw_port) != str(cfg.port):
                     print(f"warning: port setting {raw_port!r} is not a usable TCP port; using {cfg.port}")
+                for problem in voices.voice_map(setting("voices", None), language.SUPPORTED)[1]:
+                    print(f"warning: {problem}")
                 service.install(cfg)
                 print("Next: hermes config set tts.provider kokoro-mlx")
             elif cmd == "status":

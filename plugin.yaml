@@ -28,7 +28,7 @@ config_schema:
     type: dict
     default: {}
     label: Voice per language
-    description: "Optional map from a detected language to a voice, e.g. {pt: pf_dora, en: bf_emma}. Each sentence is spoken by the voice of its language; sentences with no clear language keep the previous voice. Detects pt and en. Empty = always use `voice`. Ignored when tts.voice is set. Run `hermes kokoro install` again after changing it so the server loads these voices at start-up."
+    description: "Optional map from a detected language to a voice, e.g. {pt: pf_dora, en: bf_emma}. Each sentence is spoken by the voice of its language; sentences with no clear language keep the previous voice. Detects pt, en and it; other keys are ignored with a warning. Empty = always use `voice`. Ignored when tts.voice is set. Run `hermes kokoro install` again after changing it so the server loads these voices at start-up."
   english_words:
     type: list
     default: []

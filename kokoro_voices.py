@@ -33,6 +33,31 @@ def is_valid_voice_id(voice: object) -> bool:
     return isinstance(voice, str) and bool(VOICE_ID.match(voice)) and voice[0] in LANGUAGES
 
 
+def voice_map(raw: object, languages: tuple[str, ...]) -> tuple[dict[str, str], list[str]]:
+    """``settings.voices`` as ``(usable, problems)``: the language -> voice entries a sentence can
+    reach, and one message per entry that is ignored (a language the plugin does not detect, or
+    a voice that is not a Kokoro voice id), so nothing is dropped without a word."""
+    if raw is None or raw == {}:
+        return {}, []
+    if not isinstance(raw, dict):
+        return {}, ["voices must be a map from a language to a voice, e.g. {pt: pf_dora, en: bf_emma}; ignored"]
+    usable: dict[str, str] = {}
+    problems: list[str] = []
+    for key, voice in raw.items():
+        lang = str(key).strip().lower()
+        if lang not in languages:
+            problems.append(f"voices.{lang} ({voice}) is ignored: sentences are detected as "
+                            f"{', '.join(languages)} only")
+        elif not is_valid_voice_id(voice):
+            problems.append(f"voices.{lang}: {voice!r} is not a Kokoro voice id and is ignored")
+        elif lang in usable:
+            problems.append(f"voices.{lang} is set twice; using {voice}, not {usable[lang]}")
+            usable[lang] = voice
+        else:
+            usable[lang] = voice
+    return usable, problems
+
+
 def lang_code_for(voice: str, override: Optional[str] = None) -> str:
     """Kokoro language code for ``voice``; ``override`` wins when it is a known code."""
     if override:

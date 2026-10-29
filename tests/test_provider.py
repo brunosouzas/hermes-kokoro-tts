@@ -223,6 +223,22 @@ def test_invalid_voice_map_entries_are_ignored(fake_server):
     assert provider(fake_server, voices="en=bf_emma").language_voices() == {}
 
 
+def test_unusable_voice_map_entries_are_logged_once(fake_server, caplog, monkeypatch):
+    import logging
+    from kokoro_tts import kokoro_provider
+    monkeypatch.setattr(kokoro_provider, "_REPORTED", set())
+    p = provider(fake_server, voices={"pt": "pf_dora", "es": "ef_dora"})
+    with caplog.at_level(logging.WARNING):
+        assert p.language_voices() == {"pt": "pf_dora"}
+        assert p.language_voices() == {"pt": "pf_dora"}
+    warnings = [r.getMessage() for r in caplog.records if "voices.es" in r.getMessage()]
+    assert len(warnings) == 1 and "ef_dora" in warnings[0]
+
+
+def test_italian_key_is_used(fake_server):
+    assert provider(fake_server, voices={"it": "im_nicola"}).language_voices() == {"it": "im_nicola"}
+
+
 def test_warm_primes_each_configured_voice_once(fake_server):
     p = provider(fake_server, **BILINGUAL)
     p.warm()

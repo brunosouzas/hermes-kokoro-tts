@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import socket
 import sys
@@ -26,6 +27,8 @@ STREAM_CHUNK = 8192
 MAX_ENGLISH_WORDS = MAX_ENTRIES  # the server applies the same limit
 
 Setting = Callable[[str, Any], Any]
+logger = logging.getLogger(__name__)
+_REPORTED: set[str] = set()  # voices-map problems already logged: language_voices() runs per reply
 
 
 class KokoroServerError(RuntimeError):
@@ -127,13 +130,15 @@ class KokoroTTSProvider(TTSProvider):
         return voices.lang_code_for(voice, None if auto else (self._setting("language", "") or None))
 
     def language_voices(self) -> dict[str, str]:
-        """``settings.voices``: detected language (``pt``, ``en``) -> Kokoro voice id. Invalid
-        entries are ignored, so a typo falls back to the default voice instead of failing."""
-        raw = self._setting("voices", None)
-        if not isinstance(raw, dict):
-            return {}
-        return {str(lang).strip().lower(): voice for lang, voice in raw.items()
-                if str(lang).strip().lower() in language.SUPPORTED and voices.is_valid_voice_id(voice)}
+        """``settings.voices``: detected language (``pt``, ``en``, ``it``) -> Kokoro voice id.
+        Unusable entries are ignored, so a typo falls back to the default voice instead of
+        failing, and each one is logged once."""
+        usable, problems = voices.voice_map(self._setting("voices", None), language.SUPPORTED)
+        for problem in problems:
+            if problem not in _REPORTED:
+                _REPORTED.add(problem)
+                logger.warning("kokoro-tts: %s", problem)
+        return usable
 
     def english_words(self) -> list[str]:
         """``settings.english_words``: words and short phrases a non-English voice should say in
@@ -151,8 +156,10 @@ class KokoroTTSProvider(TTSProvider):
     def _runs(self, text: str, voice: Optional[str]) -> list[tuple[str, str, bool]]:
         """``(text, voice, auto)`` requests for ``text``. An explicit voice (``tts.voice``) or an
         empty ``voices`` map keeps today's single-voice behaviour."""
+        if voice:
+            return [(text, self._resolve_voice(voice), False)]
         mapping = self.language_voices()
-        if voice or not mapping:
+        if not mapping:
             return [(text, self._resolve_voice(voice), False)]
         return [(part, chosen, True) for part, chosen in language.plan(text, mapping, self._resolve_voice(None))]
 
