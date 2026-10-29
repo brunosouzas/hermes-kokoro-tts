@@ -1,10 +1,10 @@
 # hermes-kokoro-tts
 
-Local [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech for [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) on Apple Silicon and Linux. Hermes speaks with a natural voice in nine languages, sentence by sentence as the reply streams, and the text never leaves your machine.
+Local [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech for [Hermes Agent](https://hermes-agent.nousresearch.com/docs/) on Apple Silicon and Linux. Hermes speaks with a natural voice in Brazilian Portuguese and English, and in Italian (not yet tested by the author), sentence by sentence as the reply streams, and the text never leaves your machine.
 
 - **Native Hermes TTS provider**: set `tts.provider: kokoro-mlx` and every surface that speaks (Desktop read-aloud, voice mode, wake word, `text_to_speech`) uses it.
 - **Streaming**: raw PCM per sentence, so the first words play while the rest of the reply is still being written.
-- **Any Kokoro voice**: 54 voices in American and British English, Spanish, French, Hindi, Italian, Japanese, Brazilian Portuguese and Mandarin.
+- **A voice per language**: each sentence is spoken by the voice of its language, Brazilian Portuguese, English or Italian, and a dictionary makes English terms inside a Portuguese sentence sound English.
 - **Isolated and offline**: the model runs in its own Python environment behind a loopback-only server. Hermes' own environment gets nothing new, and after installation nothing touches the network.
 - **Pinned**: one reviewed model revision per platform. Updating it is a code change you can see.
 
@@ -17,7 +17,7 @@ Local [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M) text-to-speech for [He
 - [`uv`](https://docs.astral.sh/uv/): `brew install uv` on macOS; on Linux `pipx install uv`, your distribution's package, or [uv's installer](https://docs.astral.sh/uv/getting-started/installation/). It also fetches Python 3.11 if you don't have it.
 - About 1.5 GB of disk: ~1.1 GB (macOS) or ~1.3 GB (Linux) of Python packages and ~340 MB of model.
 
-Nothing else is needed on Linux: espeak-ng, which most languages use for pronunciation, comes bundled in the `espeakng-loader` wheel.
+Nothing else is needed on Linux: espeak-ng, used for pronunciation, comes bundled in the `espeakng-loader` wheel.
 
 ## Install
 
@@ -41,7 +41,7 @@ hermes kokoro voices                                            # what the insta
 hermes config set plugins.entries.kokoro-tts.settings.voice bf_emma
 ```
 
-The first letter of a voice id is its language (`a` US English, `b` UK English, `e` Spanish, `f` French, `h` Hindi, `i` Italian, `j` Japanese, `p` Brazilian Portuguese, `z` Mandarin) and the second its gender. Some starting points: `af_heart`, `am_michael`, `bf_emma`, `bm_george`, `ef_dora`, `ff_siwis`, `if_sara`, `pf_dora`, `pm_alex`.
+The first letter of a voice id is its language (`a` US English, `b` UK English, `p` Brazilian Portuguese, `i` Italian) and the second its gender. Some starting points: `af_heart`, `am_michael`, `bf_emma`, `bm_george`, `pf_dora`, `pm_alex`, `if_sara`, `im_nicola`.
 
 If `tts.voice` is set in your Hermes config, it wins over the plugin setting.
 
@@ -73,7 +73,7 @@ No list can know in advance which words you use, so it is meant to grow: when yo
 
 Each language loads its pronunciation pipeline the first time it is used after the server starts. The server does that at start-up for `voice` and every voice in `voices`, so run `hermes kokoro install` again after changing either. Switching to another language later costs a one-off pause: a few seconds for most languages, up to about a minute for English, which loads spaCy and PyTorch.
 
-Languages tested by the author: Brazilian Portuguese and English. Italian detection is checked against a set of everyday sentences in the tests, but the author does not speak Italian, so reports from Italian speakers are especially welcome. The others come from Kokoro and use espeak-ng for pronunciation; Japanese and Mandarin may need extra G2P packages that this release does not install. Reports welcome.
+Tested by the author: Brazilian Portuguese and English. Italian is not yet tested by the author: its detection is checked against everyday sentences in the tests, and reports from Italian speakers are welcome.
 
 ## Settings
 
