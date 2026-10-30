@@ -10,7 +10,7 @@ Stack: Python, Hermes plugin API, MLX (mlx-audio) and launchd on macOS, PyTorch 
 Delivery: D this Mac
 Integration branch: `main`
 Trivial: none
-Deliver and verify: `hermes plugins update kokoro-tts`, and the service reinstall the README describes when server code changed; a gateway restart only with Bruno around; verify with `hermes plugins list` and `hermes kokoro` speaking a sample
+Deliver and verify: `hermes plugins update kokoro-tts`, and `hermes kokoro install` when server code changed; a gateway restart only with Bruno around; verify with `hermes plugins check-updates`, `hermes kokoro status` and `hermes kokoro say "test"`
 
 - Plugin code (`__init__.py`, `kokoro_*.py`) runs inside Hermes and uses the standard library only. Never add a dependency there; anything heavy belongs to the server.
 - Server code runs in Python 3.11 from `server/requirements.lock` (macOS) or `server/requirements-linux.lock` (Linux): `server/kokoro_server.py` plus the shared modules the installer copies next to it (`kokoro_voices.py`, `kokoro_language.py`, `kokoro_loanwords.py`; the list is `SERVER_SOURCES` in `kokoro_service.py`). Those shared modules must stay standard-library only, because the plugin imports them too.
