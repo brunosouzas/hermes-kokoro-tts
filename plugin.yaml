@@ -1,5 +1,5 @@
 name: kokoro-tts
-version: 0.4.0
+version: 0.4.0 # x-release-please-version
 manifest_version: 2
 api_version: 1
 description: "Local Kokoro text-to-speech on Apple Silicon (MLX) and Linux (PyTorch on CPU): tts.provider kokoro-mlx, a voice per language (switches per sentence between Portuguese, English and Italian), a dictionary of English words the same voice pronounces in English, sentence streaming, nothing leaves the machine."
