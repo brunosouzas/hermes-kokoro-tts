@@ -135,7 +135,7 @@ GitHub Actions runs the same tests on Ubuntu and macOS for every pull request (`
 
 ## Releases
 
-Versions follow [SemVer](https://semver.org/). [release-please](https://github.com/googleapis/release-please) reads the [Conventional Commits](https://www.conventionalcommits.org/) titles of merged pull requests (`feat:` a minor version, `fix:` a patch) and keeps a release pull request with the next version in `pyproject.toml` and `plugin.yaml` and its `CHANGELOG.md` entry; merging it creates the tag `vX.Y.Z` and its GitHub release (`.github/workflows/release-pr.yml`).
+Versions follow [SemVer](https://semver.org/). [release-please](https://github.com/googleapis/release-please) reads the [Conventional Commits](https://www.conventionalcommits.org/) messages of the commits that reach `main` (with a squash merge, the squash commit's message): `feat:` makes a minor version, `fix:`, `perf:` and `revert:` a patch, and other types release nothing. It keeps a release pull request with the next version in `pyproject.toml` and `plugin.yaml` and its `CHANGELOG.md` entry; merging it creates the tag `vX.Y.Z` and its GitHub release (`.github/workflows/release-pr.yml`).
 
 ## Licence
 

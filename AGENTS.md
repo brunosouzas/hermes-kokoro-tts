@@ -22,7 +22,7 @@ Deliver and verify: a merge updates the release pull request (release-please, `.
 ## Rules
 
 - Repository language: English.
-- Commit messages and pull request titles are Conventional Commits: release-please releases only feat and fix.
+- Commit messages and pull request titles are Conventional Commits: release-please releases feat, fix, perf and revert; other types release nothing.
 - Releases: only release-please makes a `v*` tag (when Bruno merges the release pull request). Never tag by hand, never edit the release pull request (release-please rewrites it), and never change the version in `pyproject.toml` or `plugin.yaml` by hand.
 - Board: Azure Boards `brunosouzas`, area `jarvis`; branches `ab<card>-<slug>`; pull requests end with `Fixes AB#<card>`; pull requests from outside contributors are merged by the owner; the owner's own changes follow the gates of the kit's `engineering` playbook.
 - The model pins (`MODEL_REPO`, `MODEL_REVISION` for macOS and `LINUX_MODEL_REPO`, `LINUX_MODEL_REVISION` for Linux, in `kokoro_service.py`) change only in a reviewed pull request, with the reason in its description.
