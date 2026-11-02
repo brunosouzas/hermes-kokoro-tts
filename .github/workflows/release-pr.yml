@@ -1,0 +1,25 @@
+name: Release PR
+
+# Keeps the release pull request (version in pyproject.toml and plugin.yaml, CHANGELOG.md) with
+# release-please, through the shared workflow of brunosouzas/github-reusable-workflows, acting as the
+# GitHub App brunosouzas-release (a pull request opened with GITHUB_TOKEN would start no checks).
+#
+# Merging that pull request makes the tag vX.Y.Z and the GitHub release (the app is the bypass of the
+# v* tag ruleset). Nothing is published elsewhere: Hermes installs the plugin from main.
+#
+# Needs the repository secret RELEASE_APP_PRIVATE_KEY (the app's private key) and the app installed here.
+
+on:
+  push:
+    branches: [main]
+
+permissions: {}
+
+jobs:
+  release-please:
+    # TODO(AB#243): pin to @v0.1.0 before ready.
+    uses: brunosouzas/github-reusable-workflows/.github/workflows/release-please.yml@feature/ab243-release-please
+    with:
+      skip-github-release: false
+    secrets:
+      release-app-private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

@@ -133,6 +133,10 @@ Tests use a fake model and stand-in HTTP servers, so they run anywhere; they imp
 
 GitHub Actions runs the same tests on Ubuntu and macOS for every pull request (`.github/workflows/tests.yml`), against the Hermes Agent version in `requires_hermes`.
 
+## Releases
+
+Versions follow [SemVer](https://semver.org/). [release-please](https://github.com/googleapis/release-please) reads the [Conventional Commits](https://www.conventionalcommits.org/) messages of the commits that reach `main` (with a squash merge, the squash commit's message): `feat:` makes a minor version, `fix:`, `perf:` and `revert:` a patch, and other types release nothing. It keeps a release pull request with the next version in `pyproject.toml` and `plugin.yaml` and its `CHANGELOG.md` entry; merging it creates the tag `vX.Y.Z` and its GitHub release (`.github/workflows/release-pr.yml`).
+
 ## Licence
 
 MIT. Kokoro-82M is Apache-2.0 ([hexgrad/Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M)); the MLX conversion is [mlx-community/Kokoro-82M-bf16](https://huggingface.co/mlx-community/Kokoro-82M-bf16); inference uses [mlx-audio](https://github.com/Blaizzy/mlx-audio) (MIT) on macOS and [kokoro](https://github.com/hexgrad/kokoro) (Apache-2.0) on Linux.
